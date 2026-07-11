@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Writing — EHSAN IELTS Mock Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="exam-header">
+  <div class="exam-header-left">
+    <span class="section-tag">WRITING</span>
+    <span id="writingTaskLabel" class="part-label">Task 1</span>
+  </div>
+  <div class="exam-timer" id="writingTimer">20:00</div>
+  <div class="exam-header-right">
+    <span id="writingCandidateName">—</span>
+    <button class="btn btn-sm btn-danger" id="btnSubmitWritingTask">Submit &amp; Continue</button>
+  </div>
+</header>
+<div class="exam-body">
+  <div class="exam-passage" id="writingPromptPane"></div>
+  <div class="exam-questions writing-answer-pane">
+    <textarea id="writingAnswerArea" class="writing-textarea" placeholder="Write your answer here..."></textarea>
+    <div class="word-count"><span id="wordCountNum">0</span> words</div>
+  </div>
+</div>
+<script src="js/common.js"></script>
+<script src="js/student-writing.js"></script>
+</body>
+</html>

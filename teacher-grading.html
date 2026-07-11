@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grade Writing — EHSAN IELTS Mock Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="admin-shell">
+  <aside class="admin-sidebar">
+    <div class="admin-brand">EHSAN<span>IELTS</span></div>
+    <nav class="admin-nav">
+      <a class="admin-nav-btn" href="teacher-dashboard.html">Exams</a>
+      <a class="admin-nav-btn" href="teacher-builder.html">Exam Builder</a>
+      <a class="admin-nav-btn" href="teacher-submissions.html">Submissions</a>
+      <a class="admin-nav-btn active" href="teacher-grading.html">Grade Writing</a>
+    </nav>
+    <a class="btn sidebar-logout btn-sm" href="index.html" id="btnLogout" style="margin-top:auto;">Log Out</a>
+  </aside>
+
+  <main class="admin-main">
+    <div class="panel-head"><h2>Grade Writing</h2></div>
+    <div id="gradingList"></div>
+    <div class="submit-bar">
+      <button class="btn btn-primary" id="btnSubmitGrades">Submit Grades</button>
+      <span id="gradingSaveMsg" class="success-msg"></span>
+    </div>
+  </main>
+</div>
+<script src="js/common.js"></script>
+<script src="js/teacher-grading.js"></script>
+</body>
+</html>

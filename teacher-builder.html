@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exam Builder — EHSAN IELTS Mock Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="admin-shell">
+  <aside class="admin-sidebar">
+    <div class="admin-brand">EHSAN<span>IELTS</span></div>
+    <nav class="admin-nav">
+      <a class="admin-nav-btn" href="teacher-dashboard.html">Exams</a>
+      <a class="admin-nav-btn active" href="teacher-builder.html">Exam Builder</a>
+      <a class="admin-nav-btn" href="teacher-submissions.html">Submissions</a>
+      <a class="admin-nav-btn" href="teacher-grading.html">Grade Writing</a>
+    </nav>
+    <a class="btn sidebar-logout btn-sm" href="index.html" id="btnLogout" style="margin-top:auto;">Log Out</a>
+  </aside>
+
+  <main class="admin-main">
+    <div class="panel-head">
+      <h2>Exam Builder</h2>
+      <select id="builderExamSelect" class="text-input" style="max-width:260px;"></select>
+    </div>
+
+    <div class="builder-tabs">
+      <button class="builder-tab active" data-btab="btabListening">Listening</button>
+      <button class="builder-tab" data-btab="btabReading">Reading</button>
+      <button class="builder-tab" data-btab="btabWriting">Writing</button>
+    </div>
+
+    <div class="builder-tab-pane active" id="btabListening">
+      <p class="muted small">Add up to 4 parts. Each part has one audio file and its own questions.</p>
+      <div id="listeningPartsList"></div>
+      <button class="btn btn-ghost btn-sm" id="btnAddListeningPart">+ Add Listening Part</button>
+    </div>
+
+    <div class="builder-tab-pane" id="btabReading">
+      <p class="muted small">Add up to 3 passages. Each passage has its own passage text and questions.</p>
+      <div id="readingPassagesList"></div>
+      <button class="btn btn-ghost btn-sm" id="btnAddReadingPassage">+ Add Reading Passage</button>
+    </div>
+
+    <div class="builder-tab-pane" id="btabWriting">
+      <div class="field-block">
+        <label>Task 1 Prompt (report/letter)</label>
+        <textarea id="writingTask1Prompt" class="text-input textarea-input" rows="4" placeholder="e.g. The chart below shows..."></textarea>
+        <label>Task 1 Image URL (optional — chart/diagram)</label>
+        <input type="text" id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png">
+      </div>
+      <div class="field-block">
+        <label>Task 2 Prompt (essay)</label>
+        <textarea id="writingTask2Prompt" class="text-input textarea-input" rows="4" placeholder="e.g. Some people believe..."></textarea>
+      </div>
+    </div>
+
+    <div class="submit-bar">
+      <button class="btn btn-primary" id="btnSubmitExam">Submit Exam</button>
+      <span id="builderSaveMsg" class="success-msg"></span>
+    </div>
+  </main>
+</div>
+<script src="js/common.js"></script>
+<script src="js/teacher-builder.js"></script>
+</body>
+</html>
