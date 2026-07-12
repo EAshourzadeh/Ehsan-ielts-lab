@@ -123,9 +123,12 @@ function downloadResultsFile(session) {
 
 /* ---------- Generate final formatted result report (teacher, after grading) ---------- */
 function generateResultReport(r) {
-  const overall = r.writingBand !== undefined
-    ? (Math.round(((r.listeningBand + r.readingBand + r.writingBand) / 3) * 2) / 2).toFixed(1)
+  const isComplete = r.writingBand !== undefined && r.speakingBand !== undefined;
+  // Calculate average of all 4 sections, rounded to nearest 0.5 per standard IELTS rules
+  const overall = isComplete
+    ? (Math.round(((r.listeningBand + r.readingBand + r.writingBand + r.speakingBand) / 4) * 2) / 2).toFixed(1)
     : "Pending";
+    
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IELTS Result — ${r.studentName}</title>
   <style>
     body{font-family:'IBM Plex Sans',Arial,sans-serif;background:#EDF0F2;color:#1B2A41;padding:50px;}
@@ -141,17 +144,19 @@ function generateResultReport(r) {
   </style></head><body>
   <div class="sheet">
     <h1>IELTS Mock Test Result</h1>
-    <div class="meta">${r.studentName} &middot; ${r.examName} &middot; submitted ${new Date(r.submittedAt).toLocaleString()}</div>
+    <div class="meta">${r.studentName} &middot; ${r.examName} &middot; Submitted ${new Date(r.submittedAt).toLocaleDateString()}</div>
     <table>
       <tr><th>Section</th><th>Band</th></tr>
       <tr><td>Listening</td><td class="band">${r.listeningBand}</td></tr>
       <tr><td>Reading</td><td class="band">${r.readingBand}</td></tr>
       <tr><td>Writing</td><td class="band">${r.writingBand !== undefined ? r.writingBand : "Not yet graded"}</td></tr>
+      <tr><td>Speaking</td><td class="band">${r.speakingBand !== undefined ? r.speakingBand : "Not yet graded"}</td></tr>
     </table>
     <div class="overall"><span>Overall Band</span><span class="band">${overall}</span></div>
     ${r.writingFeedback ? `<div class="feedback"><strong>Teacher feedback:</strong><br>${r.writingFeedback}</div>` : ""}
   </div>
   </body></html>`;
+  
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
