@@ -30,7 +30,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="audio-player-block">
           <h3>${part.title}</h3>
           <p class="muted small">Audio plays once. Answer as you listen.</p>
-          <audio controls src="${part.audio}" onerror="this.insertAdjacentHTML('afterend','<div class=audio-missing-note>&#9888; Audio file not found at ${part.audio} — add it to assets/audio/ in the repo.</div>')"></audio>
+          <audio controls src="${part.audio}" onerror="this.insertAdjacentHTML('afterend','<div class=audio-missing-note>&#9888; Audio file not found at ${part.audio} — assets/audio/ in the repo.</div>')"></audio>
         </div>`;
     } else {
       passagePane.innerHTML = `<h3>${part.title}</h3><p>${part.passage}</p>`;
