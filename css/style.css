@@ -44,6 +44,14 @@ a { text-decoration: none; color: inherit; }
 .btn-ghost:hover { border-color: var(--ink-soft); }
 .btn-danger { background: var(--danger); color: #fff; }
 .btn-danger:hover { background: #8a3626; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+
+/* ===== Custom restricted audio player (Play-only, no seek/pause/download) ===== */
+.custom-audio-player { margin-top: 16px; }
+.audio-status { font-family: var(--mono); font-size: 0.9rem; color: var(--teal); font-weight: 600; margin-top: 8px; }
+
+/* ===== Live data indicator (Submissions page) ===== */
+#liveIndicator { color: var(--teal); font-weight: 600; }
 .btn-lg { padding: 15px 32px; font-size: 1.05rem; }
 .btn-sm { padding: 8px 14px; font-size: 0.85rem; }
 

@@ -18,16 +18,22 @@
       <a class="admin-nav-btn active" href="teacher-submissions.html">Submissions</a>
       <a class="admin-nav-btn" href="teacher-grading.html">Grade Writing</a>
     </nav>
-    <a class="btn sidebar-logout btn-sm" href="index.html" id="btnLogout" style="margin-top:auto;">Log Out</a>
+    <button class="btn sidebar-logout btn-sm" id="btnLogout" style="margin-top:auto;">Log Out</button>
   </aside>
 
   <main class="admin-main">
-    <div class="panel-head"><h2>Import Student Submissions</h2></div>
-    <p class="muted">Import the results JSON file each student downloads (or emails you) at the end of their exam.</p>
-    <input type="file" id="importResultsInput" accept=".json" multiple>
+    <div class="panel-head">
+      <h2>Submissions</h2>
+      <span class="muted small" id="liveIndicator">&#9679; Live</span>
+    </div>
+    <p class="muted">Every finished student exam appears here automatically as soon as it's submitted — no import needed. Head to <strong>Grade Writing</strong> to score essays and speaking.</p>
     <div id="importedList" class="exam-list" style="margin-top:20px;"></div>
   </main>
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
 <script src="js/common.js"></script>
 <script src="js/teacher-submissions.js"></script>
 </body>

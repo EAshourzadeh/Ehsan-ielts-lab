@@ -1,14 +1,16 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   const session = getSession();
   if (!session) { window.location.href = "student-login.html"; return; }
 
-  let runner = { section: null, parts: [], partIndex: 0, timerSeconds: 0, timerHandle: null };
+  const exams = await getExams();
+  const exam = exams[session.examId];
+
+  let runner = { section: null, parts: [], partIndex: 0, timerSeconds: 0, timerHandle: null, lastPartMediaReady: false };
 
   document.getElementById("runnerCandidateName").textContent = session.studentName;
   startSection("listening");
 
   function startSection(section) {
-    const exam = getExams()[session.examId];
     runner.section = section;
     runner.parts = section === "listening" ? exam.listening : exam.reading;
     runner.timerSeconds = SECTION_TIMES[section];
@@ -19,29 +21,107 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function currentAnswers() { return runner.section === "listening" ? session.listeningAnswers : session.readingAnswers; }
 
+  function updateSubmitGate() {
+    const btn = document.getElementById("btnSubmitSection");
+    const isLastPart = runner.partIndex === runner.parts.length - 1;
+    if (runner.section === "listening") {
+      btn.disabled = !(isLastPart && runner.lastPartMediaReady);
+      btn.title = btn.disabled ? "Finish listening to the final part before submitting" : "";
+    } else {
+      btn.disabled = false; // Reading has no audio-order constraint — free navigation
+      btn.title = "";
+    }
+  }
+
   function renderRunnerPart(partIdx) {
     const part = runner.parts[partIdx];
     runner.partIndex = partIdx;
-    document.getElementById("runnerPartLabel").textContent = part.title;
+    runner.lastPartMediaReady = false;
+    const isLastPart = partIdx === runner.parts.length - 1;
+    document.getElementById("runnerPartLabel").textContent =
+      `${runner.section === "listening" ? "Part" : "Passage"} ${partIdx + 1} of ${runner.parts.length} — ${part.title}`;
 
     const passagePane = document.getElementById("runnerPassagePane");
     if (runner.section === "listening") {
       passagePane.innerHTML = `
         <div class="audio-player-block">
           <h3>${part.title}</h3>
-          <p class="muted small">Audio plays once. Answer as you listen.</p>
-          <audio controls src="${part.audio}" onerror="this.insertAdjacentHTML('afterend','<div class=audio-missing-note>&#9888; Audio file not found at ${part.audio} — assets/audio/ in the repo.</div>')"></audio>
+          <p class="muted small">Audio plays once. You cannot pause, rewind, skip ahead, or download it.</p>
+          <div class="custom-audio-player">
+            <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
+            <div class="audio-status" id="audioStatus" style="display:none;"></div>
+          </div>
+          <audio id="listeningAudioEl" preload="auto" src="${part.audio}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
+          <div id="nextPartWrap" style="display:none;margin-top:18px;">
+            ${isLastPart
+              ? `<p class="muted small">This was the final Listening part. Use <strong>Submit Section</strong> above when you're ready to move on to Reading.</p>`
+              : `<button class="btn btn-primary" id="btnNextPart">Next Part &rarr;</button>`}
+          </div>
         </div>`;
+      wireAudioPlayer(part, isLastPart);
     } else {
-      passagePane.innerHTML = `<h3>${part.title}</h3><p>${part.passage}</p>`;
+      passagePane.innerHTML = `
+        <h3>${part.title}</h3><p>${part.passage}</p>
+        <div class="passage-nav" style="margin-top:20px;display:flex;gap:10px;">
+          ${partIdx > 0 ? `<button class="btn btn-ghost btn-sm" id="btnPrevPassage">&larr; Previous Passage</button>` : ""}
+          ${!isLastPart ? `<button class="btn btn-primary btn-sm" id="btnNextPassage">Next Passage &rarr;</button>` : ""}
+        </div>`;
+      const prevBtn = document.getElementById("btnPrevPassage");
+      const nextBtn = document.getElementById("btnNextPassage");
+      if (prevBtn) prevBtn.addEventListener("click", () => renderRunnerPart(partIdx - 1));
+      if (nextBtn) nextBtn.addEventListener("click", () => renderRunnerPart(partIdx + 1));
     }
 
     const qPane = document.getElementById("runnerQuestionsPane");
     qPane.innerHTML = "";
     part.questions.forEach((q, i) => qPane.appendChild(renderQuestionBlock(q, i)));
     renderNavBubbles(part.questions);
+    updateSubmitGate();
+  }
 
-    // If this is the last part, change "Submit Section" behavior stays the same button (submits whole section)
+  function wireAudioPlayer(part, isLastPart) {
+    const audioEl = document.getElementById("listeningAudioEl");
+    const playBtn = document.getElementById("audioPlayBtn");
+    const statusEl = document.getElementById("audioStatus");
+    const nextWrap = document.getElementById("nextPartWrap");
+
+    audioEl.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // Defensive anti-seek: audio has no visible scrub bar, but block programmatic/keyboard seeking too.
+    let lastAllowedTime = 0;
+    audioEl.addEventListener("timeupdate", () => { lastAllowedTime = audioEl.currentTime; });
+    audioEl.addEventListener("seeking", () => {
+      if (Math.abs(audioEl.currentTime - lastAllowedTime) > 0.75) audioEl.currentTime = lastAllowedTime;
+    });
+
+    function onMediaReady() {
+      runner.lastPartMediaReady = true;
+      nextWrap.style.display = "block";
+      updateSubmitGate();
+    }
+
+    playBtn.addEventListener("click", () => {
+      audioEl.play().catch(() => {
+        statusEl.style.display = "block";
+        statusEl.textContent = "Couldn't start audio automatically — check your browser's autoplay setting.";
+      });
+      playBtn.style.display = "none";
+      statusEl.style.display = "block";
+      statusEl.textContent = "&#9654; Playing…".replace("&#9654;", "▶");
+    });
+    audioEl.addEventListener("ended", () => {
+      statusEl.textContent = "✓ Finished playing";
+      onMediaReady();
+    });
+    audioEl.addEventListener("error", () => {
+      statusEl.style.display = "block";
+      statusEl.textContent = `⚠ Audio file not found at ${part.audio} — add it to assets/audio/ in the repo.`;
+      playBtn.style.display = "none";
+      onMediaReady(); // don't let a missing file block the exam
+    });
+
+    const btnNextPart = document.getElementById("btnNextPart");
+    if (btnNextPart) btnNextPart.addEventListener("click", () => renderRunnerPart(runner.partIndex + 1));
   }
 
   function renderQuestionBlock(q, i) {
@@ -123,11 +203,11 @@ document.addEventListener("DOMContentLoaded", function () {
   function submitSection() {
     clearTimer();
     if (runner.section === "listening") {
-      session.listeningScore = scoreSection(getExams()[session.examId].listening, session.listeningAnswers);
+      session.listeningScore = scoreSection(exam.listening, session.listeningAnswers);
       saveSession(session);
       startSection("reading");
     } else {
-      session.readingScore = scoreSection(getExams()[session.examId].reading, session.readingAnswers);
+      session.readingScore = scoreSection(exam.reading, session.readingAnswers);
       saveSession(session);
       window.location.href = "student-writing.html";
     }

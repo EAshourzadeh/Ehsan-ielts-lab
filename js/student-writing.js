@@ -1,10 +1,18 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async function () {
   const session = getSession();
   if (!session) { window.location.href = "student-login.html"; return; }
 
   document.getElementById("writingCandidateName").textContent = session.studentName;
-  const exam = getExams()[session.examId];
+  const exams = await getExams();
+  const exam = exams[session.examId];
   let timerSeconds = 0, timerHandle = null, currentTask = 1;
+
+  /* ---------- Block copy / cut / paste / right-click on the answer box ---------- */
+  const area = document.getElementById("writingAnswerArea");
+  ["copy", "cut", "paste", "contextmenu"].forEach(evt => {
+    area.addEventListener(evt, (e) => e.preventDefault());
+  });
+  area.addEventListener("drop", (e) => e.preventDefault()); // block dragging text in from elsewhere
 
   showTask(1);
 
@@ -12,7 +20,6 @@ document.addEventListener("DOMContentLoaded", function () {
     currentTask = taskNum;
     document.getElementById("writingTaskLabel").textContent = "Task " + taskNum;
     const promptPane = document.getElementById("writingPromptPane");
-    const area = document.getElementById("writingAnswerArea");
     area.value = "";
     updateWordCount();
     if (taskNum === 1) {
@@ -25,26 +32,31 @@ document.addEventListener("DOMContentLoaded", function () {
     startTimer();
   }
 
-  document.getElementById("writingAnswerArea").addEventListener("input", updateWordCount);
+  area.addEventListener("input", updateWordCount);
   function updateWordCount() {
-    const text = document.getElementById("writingAnswerArea").value.trim();
+    const text = area.value.trim();
     document.getElementById("wordCountNum").textContent = text ? text.split(/\s+/).length : 0;
   }
 
-  document.getElementById("btnSubmitWritingTask").addEventListener("click", submitTask);
+  const submitBtn = document.getElementById("btnSubmitWritingTask");
+  submitBtn.addEventListener("click", submitTask);
 
-  function submitTask() {
+  async function submitTask() {
     clearTimer();
-    const text = document.getElementById("writingAnswerArea").value;
+    const text = area.value;
     if (currentTask === 1) {
       session.writingTask1 = text;
       saveSession(session);
       showTask(2);
     } else {
+      submitBtn.disabled = true; submitBtn.textContent = "Submitting...";
       session.writingTask2 = text;
       session.submittedAt = new Date().toISOString();
       session.listeningBand = rawToBand(session.listeningScore.correct);
       session.readingBand = rawToBand(session.readingScore.correct);
+      const resultId = generateResultId();
+      session.resultId = resultId;
+      await createResult(resultId, session);
       saveSession(session);
       window.location.href = "student-results.html";
     }

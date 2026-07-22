@@ -1,13 +1,15 @@
 document.addEventListener("DOMContentLoaded", init);
 window.addEventListener("pageshow", init); // also fires on back/forward-cache restores, so the name field can't reappear pre-filled
 
-function init() {
+async function init() {
   const nameInput = document.getElementById("studentNameInput");
   nameInput.value = ""; // always start blank, per-student
 
   const sel = document.getElementById("examSelect");
+  sel.innerHTML = `<option>Loading exams…</option>`;
+  const exams = await getExams();
   sel.innerHTML = "";
-  Object.values(getExams()).forEach(ex => {
+  Object.values(exams).forEach(ex => {
     const opt = document.createElement("option");
     opt.value = ex.id; opt.textContent = ex.name;
     sel.appendChild(opt);
@@ -19,7 +21,7 @@ function init() {
     const name = nameInput.value.trim();
     const examId = sel.value;
     if (!name) { errBox.textContent = "Please enter your name."; return; }
-    const exam = getExams()[examId];
+    const exam = exams[examId];
     saveSession({
       studentName: name, examId, examName: exam.name,
       listeningAnswers: {}, readingAnswers: {},

@@ -1,14 +1,12 @@
 /* =========================================================
    EHSAN IELTS Mock Test — js/common.js
-   Loaded on every page. Holds shared constants + storage helpers.
+   Loaded on every page (after firebase-init.js).
+   Firestore collections:
+     exams   -> one document per exam, doc id = exam.id
+     results -> one document per student submission
    ========================================================= */
 
-const ADMIN_PASSWORD = "Ehsan2026";
-const LS_EXAMS = "ielts_exams";
-const LS_RESULTS = "ielts_results";
-const LS_SETTINGS = "ielts_settings";
 const SS_SESSION = "ielts_current_session";
-const SS_ADMIN_AUTH = "ielts_admin_authed";
 
 const SECTION_TIMES = { listening: 30 * 60, reading: 60 * 60, writingTask1: 20 * 60, writingTask2: 40 * 60 };
 
@@ -21,7 +19,7 @@ function rawToBand(correct) {
   return 2;
 }
 
-/* ---------- Sample exam ---------- */
+/* ---------- Sample exam (seeded into Firestore once, if the exams collection is empty) ---------- */
 function sampleExam() {
   return {
     id: "sample-exam-1",
@@ -42,6 +40,20 @@ function sampleExam() {
         questions: [
           { id: "l4", type: "multi", text: "Which TWO facilities are mentioned in the tour? (choose two)", options: ["Science building", "Swimming pool", "Cafeteria", "Bookstore"], answer: ["Science building", "Cafeteria"] },
           { id: "l5", type: "fill", text: "Tours run every ______ minutes.", answer: "45" }
+        ]
+      },
+      {
+        title: "Part 3 — Group Project Discussion",
+        audio: "assets/audio/sample-part3.mp3",
+        questions: [
+          { id: "l6", type: "mc", text: "The students agree to meet next on:", options: ["Monday", "Wednesday", "Friday"], answer: "Wednesday" }
+        ]
+      },
+      {
+        title: "Part 4 — Lecture on Renewable Energy",
+        audio: "assets/audio/sample-part4.mp3",
+        questions: [
+          { id: "l7", type: "fill", text: "Solar panel efficiency has improved by ______ percent.", answer: "20" }
         ]
       }
     ],
@@ -64,34 +76,66 @@ function sampleExam() {
   };
 }
 
-/* ---------- Storage helpers ---------- */
-function getExams() {
-  let e = JSON.parse(localStorage.getItem(LS_EXAMS) || "null");
-  if (!e) {
-    e = { "sample-exam-1": sampleExam() };
-    localStorage.setItem(LS_EXAMS, JSON.stringify(e));
+/* ---------- Firestore: exams ---------- */
+async function getExams() {
+  const snap = await db.collection("exams").get();
+  if (snap.empty) {
+    const sample = sampleExam();
+    await db.collection("exams").doc(sample.id).set(sample);
+    return { [sample.id]: sample };
   }
-  return e;
+  const exams = {};
+  snap.forEach(doc => { exams[doc.id] = doc.data(); });
+  return exams;
 }
-function saveExams(exams) { localStorage.setItem(LS_EXAMS, JSON.stringify(exams)); }
-function getResults() { return JSON.parse(localStorage.getItem(LS_RESULTS) || "{}"); }
-function saveResults(r) { localStorage.setItem(LS_RESULTS, JSON.stringify(r)); }
-function getSettings() { return JSON.parse(localStorage.getItem(LS_SETTINGS) || "{}"); }
-function saveSettings(s) { localStorage.setItem(LS_SETTINGS, JSON.stringify(s)); }
+async function saveExam(exam) {
+  await db.collection("exams").doc(exam.id).set(exam);
+}
+async function deleteExam(examId) {
+  await db.collection("exams").doc(examId).delete();
+}
 
-/* ---------- Cross-page student session (sessionStorage; survives page navigation, clears on tab close) ---------- */
+/* ---------- Firestore: results ---------- */
+function generateResultId() { return db.collection("results").doc().id; }
+async function createResult(resultId, resultData) {
+  await db.collection("results").doc(resultId).set(resultData);
+}
+async function updateResult(resultId, patch) {
+  await db.collection("results").doc(resultId).update(patch);
+}
+function listenResults(callback) {
+  // Live listener: fires immediately with current data, then again on every change.
+  // Returns an unsubscribe function.
+  return db.collection("results").orderBy("submittedAt", "desc").onSnapshot(snap => {
+    const results = {};
+    snap.forEach(doc => { results[doc.id] = doc.data(); });
+    callback(results);
+  });
+}
+
+/* ---------- Cross-page student session (sessionStorage; per-device, per-tab; not the database) ---------- */
 function getSession() { return JSON.parse(sessionStorage.getItem(SS_SESSION) || "null"); }
 function saveSession(s) { sessionStorage.setItem(SS_SESSION, JSON.stringify(s)); }
 function clearSession() { sessionStorage.removeItem(SS_SESSION); }
 
-/* ---------- Admin auth guard: call at top of every teacher-*.html page except teacher-login.html ---------- */
-function requireAdminAuth() {
-  if (sessionStorage.getItem(SS_ADMIN_AUTH) !== "1") {
-    window.location.href = "teacher-login.html";
-  }
+/* ---------- Admin auth guard ----------
+   Call at top of every teacher-*.html page (except teacher-login.html).
+   Runs onReady(user) once Firebase confirms the signed-in teacher;
+   redirects to login if nobody is signed in. */
+function requireAdminAuth(onReady) {
+  auth.onAuthStateChanged(user => {
+    if (!user) {
+      window.location.href = "teacher-login.html";
+    } else if (typeof onReady === "function") {
+      onReady(user);
+    }
+  });
+}
+function logoutAdmin() {
+  auth.signOut().then(() => { window.location.href = "index.html"; });
 }
 
-/* ---------- Scoring (used by student-writing.html / student-exam.html at finish time) ---------- */
+/* ---------- Scoring ---------- */
 function scoreSection(parts, answers) {
   let total = 0, correct = 0;
   parts.forEach(part => part.questions.forEach(q => {
@@ -109,26 +153,13 @@ function scoreSection(parts, answers) {
   return { correct, total };
 }
 
-/* ---------- Downloadable JSON results file ---------- */
-function downloadResultsFile(session) {
-  const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const safeName = session.studentName.replace(/\s+/g, "_");
-  a.href = url;
-  a.download = `IELTS_Result_${safeName}_${session.examId}.json`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-}
-
 /* ---------- Generate final formatted result report (teacher, after grading) ---------- */
 function generateResultReport(r) {
   const isComplete = r.writingBand !== undefined && r.speakingBand !== undefined;
-  // Calculate average of all 4 sections, rounded to nearest 0.5 per standard IELTS rules
   const overall = isComplete
     ? (Math.round(((r.listeningBand + r.readingBand + r.writingBand + r.speakingBand) / 4) * 2) / 2).toFixed(1)
     : "Pending";
-    
+
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>IELTS Result — ${r.studentName}</title>
   <style>
     body{font-family:'IBM Plex Sans',Arial,sans-serif;background:#EDF0F2;color:#1B2A41;padding:50px;}
@@ -156,7 +187,7 @@ function generateResultReport(r) {
     ${r.writingFeedback ? `<div class="feedback"><strong>Teacher feedback:</strong><br>${r.writingFeedback}</div>` : ""}
   </div>
   </body></html>`;
-  
+
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

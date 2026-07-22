@@ -13,16 +13,15 @@
   <div class="intro-card">
     <div class="intro-eyebrow">Complete</div>
     <h2>You've finished the mock test</h2>
-    <p class="muted" id="resultsExplainer">Your results file has been downloaded. Please submit it to your teacher for Writing review and your final band scores.</p>
+    <p class="muted">Your results have been submitted directly to your teacher for Writing (and Speaking) review. No further action needed from you.</p>
     <div class="prelim-scores" id="prelimScores"></div>
-    <div id="emailBlock" style="display:none;margin:14px 0;">
-      <button class="btn btn-primary" id="btnEmailTeacher">Email Results to Teacher</button>
-      <p class="muted small" style="margin-top:8px;">This opens an email draft to <span id="teacherEmailDisplay"></span> with your results attached info. Your results file downloads automatically — please attach it before sending, since browsers can't attach files to an email draft automatically.</p>
-    </div>
-    <button class="btn btn-ghost" id="btnDownloadAgain">Download Results File Again</button>
     <a class="btn btn-ghost" href="index.html">Return to Start</a>
   </div>
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
 <script src="js/common.js"></script>
 <script src="js/student-results.js"></script>
 </body>

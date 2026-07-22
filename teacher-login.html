@@ -13,12 +13,17 @@
   <div class="auth-card">
     <a class="link-back" href="index.html">&larr; Back</a>
     <h2>Teacher Login</h2>
-    <p class="muted">Enter the admin password to manage exams.</p>
-    <input type="password" id="adminPassInput" class="text-input" placeholder="Password" autocomplete="off">
+    <p class="muted">Sign in with your teacher account to manage exams.</p>
+    <input type="email" id="adminEmailInput" class="text-input" placeholder="Email" autocomplete="username">
+    <input type="password" id="adminPassInput" class="text-input" placeholder="Password" autocomplete="current-password">
     <div id="adminLoginError" class="error-msg"></div>
-    <button class="btn btn-primary" id="btnAdminSubmit">Enter Admin Panel</button>
+    <button class="btn btn-primary" id="btnAdminSubmit">Sign In</button>
   </div>
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
 <script src="js/common.js"></script>
 <script src="js/teacher-login.js"></script>
 </body>
