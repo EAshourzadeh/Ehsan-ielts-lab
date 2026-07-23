@@ -46,9 +46,10 @@ document.addEventListener("DOMContentLoaded", async function () {
       passagePane.innerHTML = `
         <div class="audio-player-block">
           <h3>${part.title}</h3>
-          <p class="muted small">Audio plays once. You cannot pause, rewind, skip ahead, or download it.</p>
+          <p class="muted small">Audio plays once and cannot be paused, rewound, or downloaded. Having a technical problem? Use Skip to move on.</p>
           <div class="custom-audio-player">
             <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
+            <button class="btn btn-ghost btn-sm" id="audioSkipBtn">Skip This Part</button>
             <div class="audio-status" id="audioStatus" style="display:none;"></div>
           </div>
           <audio id="listeningAudioEl" preload="auto" src="${part.audio}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
@@ -61,7 +62,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       wireAudioPlayer(part, isLastPart);
     } else {
       passagePane.innerHTML = `
-        <h3>${part.title}</h3><p>${part.passage}</p>
+        <h3>${part.title}</h3>${part.passage}
         <div class="passage-nav" style="margin-top:20px;display:flex;gap:10px;">
           ${partIdx > 0 ? `<button class="btn btn-ghost btn-sm" id="btnPrevPassage">&larr; Previous Passage</button>` : ""}
           ${!isLastPart ? `<button class="btn btn-primary btn-sm" id="btnNextPassage">Next Passage &rarr;</button>` : ""}
@@ -82,6 +83,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   function wireAudioPlayer(part, isLastPart) {
     const audioEl = document.getElementById("listeningAudioEl");
     const playBtn = document.getElementById("audioPlayBtn");
+    const skipBtn = document.getElementById("audioSkipBtn");
     const statusEl = document.getElementById("audioStatus");
     const nextWrap = document.getElementById("nextPartWrap");
 
@@ -109,14 +111,25 @@ document.addEventListener("DOMContentLoaded", async function () {
       statusEl.style.display = "block";
       statusEl.textContent = "&#9654; Playing…".replace("&#9654;", "▶");
     });
+    skipBtn.addEventListener("click", () => {
+      if (!confirm("Skip this listening part? You won't be able to come back to it once you move on.")) return;
+      audioEl.pause();
+      playBtn.style.display = "none";
+      skipBtn.style.display = "none";
+      statusEl.style.display = "block";
+      statusEl.textContent = "⏭ Part skipped";
+      onMediaReady();
+    });
     audioEl.addEventListener("ended", () => {
       statusEl.textContent = "✓ Finished playing";
+      skipBtn.style.display = "none";
       onMediaReady();
     });
     audioEl.addEventListener("error", () => {
       statusEl.style.display = "block";
       statusEl.textContent = `⚠ Audio file not found at ${part.audio} — add it to assets/audio/ in the repo.`;
       playBtn.style.display = "none";
+      skipBtn.style.display = "none";
       onMediaReady(); // don't let a missing file block the exam
     });
 

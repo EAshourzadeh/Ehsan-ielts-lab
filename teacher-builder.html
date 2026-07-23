@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
 </head>
 <body>
 <div class="admin-shell">
@@ -48,13 +49,13 @@
     <div class="builder-tab-pane" id="btabWriting">
       <div class="field-block">
         <label>Task 1 Prompt (report/letter)</label>
-        <textarea id="writingTask1Prompt" class="text-input textarea-input" rows="4" placeholder="e.g. The chart below shows..."></textarea>
+        <div id="writingTask1Prompt" class="rich-editor"></div>
         <label>Task 1 Image URL (optional — chart/diagram)</label>
         <input type="text" id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png">
       </div>
       <div class="field-block">
         <label>Task 2 Prompt (essay)</label>
-        <textarea id="writingTask2Prompt" class="text-input textarea-input" rows="4" placeholder="e.g. Some people believe..."></textarea>
+        <div id="writingTask2Prompt" class="rich-editor"></div>
       </div>
     </div>
 
@@ -67,6 +68,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
 <script src="js/firebase-init.js"></script>
 <script src="js/common.js"></script>
 <script src="js/teacher-builder.js"></script>

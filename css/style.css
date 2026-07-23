@@ -48,6 +48,7 @@ a { text-decoration: none; color: inherit; }
 
 /* ===== Custom restricted audio player (Play-only, no seek/pause/download) ===== */
 .custom-audio-player { margin-top: 16px; }
+.custom-audio-player button + button { margin-left: 10px; }
 .audio-status { font-family: var(--mono); font-size: 0.9rem; color: var(--teal); font-weight: 600; margin-top: 8px; }
 
 /* ===== Live data indicator (Submissions page) ===== */
@@ -133,6 +134,9 @@ a { text-decoration: none; color: inherit; }
 .exam-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: calc(100vh - 130px); }
 .exam-passage { padding: 32px 36px; background: var(--paper); border-right: 1px solid var(--line); overflow-y: auto; max-height: calc(100vh - 130px); line-height: 1.75; }
 .exam-passage h3 { font-family: var(--serif); margin-top: 0; }
+.exam-passage h2, .exam-passage h3 { font-family: var(--serif); }
+.exam-passage ol, .exam-passage ul { padding-left: 22px; }
+.exam-passage blockquote { border-left: 3px solid var(--teal); margin: 12px 0; padding: 4px 16px; color: var(--ink-soft); }
 .exam-questions { padding: 32px 36px; background: #fff; overflow-y: auto; max-height: calc(100vh - 130px); }
 .question-block { margin-bottom: 28px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .question-block:last-child { border-bottom: none; }
@@ -198,6 +202,13 @@ a { text-decoration: none; color: inherit; }
 
 .field-block { margin-bottom: 22px; }
 .field-block label { display: block; font-weight: 600; font-size: 0.88rem; margin: 12px 0 4px; }
+
+/* ===== Rich text editor (Quill) — used for Reading passages and Writing prompts ===== */
+.rich-editor { background: #fff; border-radius: 8px; overflow: hidden; margin: 6px 0; }
+.rich-editor .ql-toolbar { border: 1.5px solid var(--line); border-bottom: none; border-radius: 8px 8px 0 0; background: var(--bg); }
+.rich-editor .ql-container { border: 1.5px solid var(--line); border-radius: 0 0 8px 8px; font-family: var(--sans); font-size: 0.95rem; min-height: 140px; }
+.rich-editor .ql-editor { min-height: 140px; line-height: 1.7; }
+.rich-editor .ql-editor.ql-blank::before { color: var(--ink-soft); font-style: normal; }
 
 .builder-part-card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
 .builder-part-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; }

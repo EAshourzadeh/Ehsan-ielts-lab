@@ -23,10 +23,10 @@ document.addEventListener("DOMContentLoaded", async function () {
     area.value = "";
     updateWordCount();
     if (taskNum === 1) {
-      promptPane.innerHTML = `<h3>Task 1</h3><p>${exam.writing.task1Prompt}</p>` + (exam.writing.task1Image ? `<img src="${exam.writing.task1Image}" style="max-width:100%;border-radius:8px;margin-top:10px;" alt="Task 1 chart">` : "");
+      promptPane.innerHTML = `<h3>Task 1</h3>${exam.writing.task1Prompt}` + (exam.writing.task1Image ? `<img src="${exam.writing.task1Image}" style="max-width:100%;border-radius:8px;margin-top:10px;" alt="Task 1 chart">` : "");
       timerSeconds = SECTION_TIMES.writingTask1;
     } else {
-      promptPane.innerHTML = `<h3>Task 2</h3><p>${exam.writing.task2Prompt}</p>`;
+      promptPane.innerHTML = `<h3>Task 2</h3>${exam.writing.task2Prompt}`;
       timerSeconds = SECTION_TIMES.writingTask2;
     }
     startTimer();

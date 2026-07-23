@@ -9,6 +9,23 @@ document.addEventListener("DOMContentLoaded", function () {
     let hasUnsavedChanges = false;
     function markDirty() { hasUnsavedChanges = true; }
 
+    // Rich-text toolbar: headings, bold/italic/underline, lists, blockquote — enough for
+    // formatting a passage or a Task 1/2 prompt without overwhelming a non-technical teacher.
+    const RICH_TOOLBAR = [
+      [{ header: [2, 3, false] }],
+      ["bold", "italic", "underline"],
+      [{ list: "ordered" }, { list: "bullet" }],
+      ["blockquote"],
+      ["clean"]
+    ];
+
+    const task1Quill = new Quill("#writingTask1Prompt", { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+    const task2Quill = new Quill("#writingTask2Prompt", { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+    task1Quill.on("text-change", markDirty);
+    task2Quill.on("text-change", markDirty);
+
+    let readingQuills = {}; // { passageIndex: QuillInstance } — live only while the current exam's Reading tab is rendered
+
     async function populateExamSelect() {
       const sel = document.getElementById("builderExamSelect");
       sel.innerHTML = `<option>Loading…</option>`;
@@ -23,6 +40,7 @@ document.addEventListener("DOMContentLoaded", function () {
       sel.value = startId;
       loadExam(exams[startId]);
     }
+
     document.getElementById("builderExamSelect").addEventListener("change", async (e) => {
       if (hasUnsavedChanges && !confirm("Discard unsaved changes for this exam?")) {
         e.target.value = workingExam.id; return;
@@ -35,11 +53,12 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!exam) return;
       workingExam = JSON.parse(JSON.stringify(exam)); // deep clone — edits stay local until Submit
       hasUnsavedChanges = false;
+      readingQuills = {}; // discard any instances from a previously loaded exam — don't flush, that data belongs to the old exam
       renderListeningBuilder();
       renderReadingBuilder();
-      document.getElementById("writingTask1Prompt").value = workingExam.writing.task1Prompt || "";
+      task1Quill.root.innerHTML = workingExam.writing.task1Prompt || "";
       document.getElementById("writingTask1Image").value = workingExam.writing.task1Image || "";
-      document.getElementById("writingTask2Prompt").value = workingExam.writing.task2Prompt || "";
+      task2Quill.root.innerHTML = workingExam.writing.task2Prompt || "";
     }
 
     document.querySelectorAll(".builder-tab").forEach(tab => {
@@ -84,10 +103,17 @@ document.addEventListener("DOMContentLoaded", function () {
       markDirty(); renderListeningBuilder();
     });
 
-    /* ---------- Reading ---------- */
+    /* ---------- Reading (passage text uses a rich-text editor, formatting/styling included) ---------- */
+    function flushReadingQuills() {
+      Object.keys(readingQuills).forEach(idx => {
+        if (workingExam.reading[idx]) workingExam.reading[idx].passage = readingQuills[idx].root.innerHTML;
+      });
+    }
     function renderReadingBuilder() {
+      flushReadingQuills(); // preserve in-progress edits before we wipe and rebuild the DOM
       const wrap = document.getElementById("readingPassagesList");
       wrap.innerHTML = "";
+      readingQuills = {};
       workingExam.reading.forEach((part, pIdx) => {
         const card = document.createElement("div");
         card.className = "builder-part-card";
@@ -97,14 +123,19 @@ document.addEventListener("DOMContentLoaded", function () {
             <button class="btn btn-danger btn-sm" data-rp-del="${pIdx}">Remove Passage</button>
           </div>
           <label style="font-size:0.85rem;font-weight:600;">Passage text</label>
-          <textarea class="text-input textarea-input" rows="6" data-rp-passage="${pIdx}">${part.passage}</textarea>
+          <div class="rich-editor" data-rp-passage="${pIdx}"></div>
           <div data-rp-questions="${pIdx}"></div>
           <button class="btn btn-ghost btn-sm" data-rp-addq="${pIdx}">+ Add Question</button>`;
         wrap.appendChild(card);
+
+        const quill = new Quill(card.querySelector(`[data-rp-passage="${pIdx}"]`), { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+        quill.root.innerHTML = part.passage || "";
+        quill.on("text-change", markDirty);
+        readingQuills[pIdx] = quill;
+
         renderQuestionEditors(card.querySelector(`[data-rp-questions="${pIdx}"]`), part.questions);
       });
       wrap.querySelectorAll("[data-rp-title]").forEach(inp => inp.addEventListener("input", e => { workingExam.reading[+e.target.dataset.rpTitle].title = e.target.value; markDirty(); }));
-      wrap.querySelectorAll("[data-rp-passage]").forEach(ta => ta.addEventListener("input", e => { workingExam.reading[+e.target.dataset.rpPassage].passage = e.target.value; markDirty(); }));
       wrap.querySelectorAll("[data-rp-del]").forEach(btn => btn.addEventListener("click", e => { workingExam.reading.splice(+e.target.dataset.rpDel, 1); markDirty(); renderReadingBuilder(); }));
       wrap.querySelectorAll("[data-rp-addq]").forEach(btn => btn.addEventListener("click", e => {
         workingExam.reading[+e.target.dataset.rpAddq].questions.push({ id: "r" + Date.now(), type: "fill", text: "", answer: "" });
@@ -168,16 +199,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     /* ---------- Writing tab (folded into the same Submit) ---------- */
-    ["writingTask1Prompt", "writingTask1Image", "writingTask2Prompt"].forEach(id => {
-      document.getElementById(id).addEventListener("input", markDirty);
-    });
+    document.getElementById("writingTask1Image").addEventListener("input", markDirty);
 
     /* ---------- Submit ---------- */
     document.getElementById("btnSubmitExam").addEventListener("click", async () => {
+      flushReadingQuills();
       workingExam.writing = {
-        task1Prompt: document.getElementById("writingTask1Prompt").value,
+        task1Prompt: task1Quill.root.innerHTML,
         task1Image: document.getElementById("writingTask1Image").value,
-        task2Prompt: document.getElementById("writingTask2Prompt").value
+        task2Prompt: task2Quill.root.innerHTML
       };
       const btn = document.getElementById("btnSubmitExam");
       btn.disabled = true; btn.textContent = "Saving...";
