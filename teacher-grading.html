@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grade Writing — EHSAN IELTS Mock Test</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grade Submissions — EHSAN IELTS Mock Test</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/teacher-grading.css">
 </head>
 <body>
 <div class="admin-shell">
@@ -21,10 +22,17 @@
     <button class="btn sidebar-logout btn-sm" id="btnLogout" style="margin-top:auto;">Log Out</button>
   </aside>
 
-  <main class="admin-main">
-    <div class="panel-head"><h2>Grade Writing</h2></div>
+  <main class="admin-main grading-admin-main">
+    <div class="panel-head grading-page-head">
+      <div>
+        <h2>Grade submissions</h2>
+        <p class="muted small">Select one student to review objective answers, writing responses, and final grades.</p>
+      </div>
+    </div>
+
     <div id="gradingList"></div>
-    <div class="submit-bar">
+
+    <div class="submit-bar grading-submit-bar">
       <button class="btn btn-primary" id="btnSubmitGrades">Submit Grades</button>
       <span id="gradingSaveMsg" class="success-msg"></span>
     </div>
