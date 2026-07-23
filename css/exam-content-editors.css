@@ -61,13 +61,37 @@
   font-weight: 700;
 }
 
-.question-label-editor .ql-editor,
-.compact-rich-editor .ql-editor {
-  min-height: 112px;
+/* Quill turns the target .rich-editor element itself into .ql-container.
+   Quill's core stylesheet gives that element height: 100%, which can resolve
+   against the whole builder card and make the editor spill over later fields.
+   Explicit editor heights keep every card in normal document flow while the
+   editable area scrolls internally when its content is longer. */
+.rich-editor.ql-container {
+  height: var(--rich-editor-height, 140px) !important;
+  min-height: var(--rich-editor-height, 140px) !important;
+  max-height: var(--rich-editor-height, 140px) !important;
+  margin: 0 0 6px;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
 }
 
-.passage-rich-editor .ql-editor {
-  min-height: 360px;
+.rich-editor.ql-container > .ql-editor {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: auto;
+}
+
+.question-label-editor {
+  --rich-editor-height: 150px;
+}
+
+.compact-rich-editor {
+  --rich-editor-height: 120px;
+}
+
+.passage-rich-editor {
+  --rich-editor-height: 360px;
 }
 
 .rich-editor .ql-editor.ql-blank::before {
