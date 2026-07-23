@@ -84,6 +84,24 @@ document.addEventListener("DOMContentLoaded", function () {
           }
         }
       });
+      // Quill applies height: 100% to the target container. In builder cards,
+      // that can make the editor resolve against the card height and overlap
+      // the question controls below it. Pin each editor to an intentional
+      // viewport and let the editable surface scroll internally.
+      const editorHeight = element.classList.contains("passage-rich-editor")
+        ? 360
+        : element.classList.contains("compact-rich-editor")
+          ? 120
+          : element.classList.contains("question-label-editor")
+            ? 150
+            : 140;
+      element.style.setProperty("height", `${editorHeight}px`, "important");
+      element.style.setProperty("min-height", `${editorHeight}px`, "important");
+      element.style.setProperty("max-height", `${editorHeight}px`, "important");
+      quill.root.style.setProperty("height", "100%", "important");
+      quill.root.style.setProperty("min-height", "0", "important");
+      quill.root.style.setProperty("overflow-y", "auto", "important");
+
       quill.root.innerHTML = html || "";
       quill.on("text-change", () => {
         markDirty();
