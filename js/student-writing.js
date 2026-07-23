@@ -7,6 +7,17 @@ document.addEventListener("DOMContentLoaded", async function () {
   const exam = exams[session.examId];
   let timerSeconds = 0, timerHandle = null, currentTask = 1;
 
+  // IELTS conversion tables assume 40 objective questions. Custom exams may contain
+  // fewer questions, so scale their percentage to a 40-question equivalent first.
+  function scoreToBand(score) {
+    if (!score || !Number.isFinite(score.total) || score.total <= 0) {
+      return { band: rawToBand(0), equivalentRaw40: 0 };
+    }
+    const correct = Math.max(0, Math.min(score.total, Number(score.correct) || 0));
+    const equivalentRaw40 = Math.max(0, Math.min(40, Math.round((correct / score.total) * 40)));
+    return { band: rawToBand(equivalentRaw40), equivalentRaw40 };
+  }
+
   /* ---------- Block copy / cut / paste / right-click on the answer box ---------- */
   const area = document.getElementById("writingAnswerArea");
   ["copy", "cut", "paste", "contextmenu"].forEach(evt => {
@@ -52,8 +63,13 @@ document.addEventListener("DOMContentLoaded", async function () {
       submitBtn.disabled = true; submitBtn.textContent = "Submitting...";
       session.writingTask2 = text;
       session.submittedAt = new Date().toISOString();
-      session.listeningBand = rawToBand(session.listeningScore.correct);
-      session.readingBand = rawToBand(session.readingScore.correct);
+      const listeningResult = scoreToBand(session.listeningScore);
+      const readingResult = scoreToBand(session.readingScore);
+      session.listeningBand = listeningResult.band;
+      session.readingBand = readingResult.band;
+      session.listeningEquivalentRaw40 = listeningResult.equivalentRaw40;
+      session.readingEquivalentRaw40 = readingResult.equivalentRaw40;
+      session.scoringVersion = 2;
       const resultId = generateResultId();
       session.resultId = resultId;
       await createResult(resultId, session);

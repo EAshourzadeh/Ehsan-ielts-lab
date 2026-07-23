@@ -1,43 +1,233 @@
 document.addEventListener("DOMContentLoaded", async function () {
+  ensureExamContentStylesheet();
+
   const session = getSession();
   if (!session) { window.location.href = "student-login.html"; return; }
 
   const exams = await getExams();
   const exam = exams[session.examId];
+  if (!exam) {
+    alert("This exam is no longer available. Please return to the login page and choose another exam.");
+    window.location.href = "student-login.html";
+    return;
+  }
 
-  let runner = { section: null, parts: [], partIndex: 0, timerSeconds: 0, timerHandle: null, lastPartMediaReady: false };
+  session.listeningAnswers = session.listeningAnswers || {};
+  session.readingAnswers = session.readingAnswers || {};
+
+  const runner = {
+    section: null,
+    parts: [],
+    partIndex: 0,
+    timerSeconds: 0,
+    timerHandle: null,
+    lastPartMediaReady: false
+  };
 
   document.getElementById("runnerCandidateName").textContent = session.studentName;
   startSection("listening");
 
   function startSection(section) {
     runner.section = section;
-    runner.parts = section === "listening" ? exam.listening : exam.reading;
+    runner.parts = section === "listening" ? (exam.listening || []) : (exam.reading || []);
     runner.timerSeconds = SECTION_TIMES[section];
     document.getElementById("runnerSectionTag").textContent = section.toUpperCase();
-    renderRunnerPart(0);
-    startTimer("runnerTimer", () => submitSection());
+
+    if (runner.parts.length === 0) {
+      submitSection();
+      return;
+    }
+
+    renderRunnerPart(0, false);
+    startTimer("runnerTimer", submitSection);
   }
 
-  function currentAnswers() { return runner.section === "listening" ? session.listeningAnswers : session.readingAnswers; }
+  function currentAnswers() {
+    const key = runner.section === "listening" ? "listeningAnswers" : "readingAnswers";
+    session[key] = session[key] || {};
+    return session[key];
+  }
+
+  function normalizeAnswer(value) {
+    return String(value ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase();
+  }
+
+  function questionIsCorrect(question, givenAnswer) {
+    if (question.type === "multi") {
+      const given = (Array.isArray(givenAnswer) ? givenAnswer : [])
+        .map(normalizeAnswer)
+        .filter(Boolean)
+        .sort();
+      const key = (Array.isArray(question.answer) ? question.answer : [])
+        .map(normalizeAnswer)
+        .filter(Boolean)
+        .sort();
+      return given.length === key.length && given.every((value, index) => value === key[index]);
+    }
+
+    const given = normalizeAnswer(givenAnswer);
+    const accepted = Array.isArray(question.answer) ? question.answer : [question.answer];
+    return Boolean(given) && accepted.some(answer => normalizeAnswer(answer) === given);
+  }
+
+  function scoreExamSection(parts, answers) {
+    let total = 0;
+    let correct = 0;
+
+    (parts || []).forEach(part => {
+      (part.questions || []).forEach(question => {
+        total += 1;
+        if (questionIsCorrect(question, answers[question.id])) correct += 1;
+      });
+    });
+
+    return { correct, total };
+  }
+
+  function escapeAttribute(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function ensureExamContentStylesheet() {
+    if (document.querySelector('link[data-exam-content-editors="1"]')) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "css/exam-content-editors.css";
+    link.dataset.examContentEditors = "1";
+    document.head.appendChild(link);
+  }
+
+  function hasRichContent(html) {
+    const value = String(html || "").trim();
+    return Boolean(value && value !== "<p><br></p>");
+  }
+
+  function sectionQuestionNumber(partIndex, questionIndex) {
+    let count = 0;
+    for (let index = 0; index < partIndex; index += 1) {
+      count += (runner.parts[index].questions || []).length;
+    }
+    return count + questionIndex + 1;
+  }
+
+  function displayQuestionGroups(part, partIndex) {
+    const questions = part.questions || [];
+    const byId = new Map(questions.map((question, index) => [question.id, { question, questionIndex: index }]));
+    const assigned = new Set();
+    const groups = [];
+
+    (Array.isArray(part.questionGroups) ? part.questionGroups : []).forEach(group => {
+      const entries = (group.questionIds || [])
+        .map(id => byId.get(id))
+        .filter(entry => entry && !assigned.has(entry.question.id));
+      entries.forEach(entry => assigned.add(entry.question.id));
+      groups.push({ label: group.label || "", entries });
+    });
+
+    const unassigned = questions
+      .map((question, questionIndex) => ({ question, questionIndex }))
+      .filter(entry => !assigned.has(entry.question.id));
+
+    if (!groups.length) {
+      groups.push({ label: part.questionLabel || part.instructions || "", entries: unassigned });
+    } else if (unassigned.length) {
+      groups[groups.length - 1].entries.push(...unassigned);
+    }
+
+    return groups
+      .filter(group => group.entries.length || hasRichContent(group.label))
+      .map(group => ({
+        label: group.label,
+        entries: group.entries.map(entry => ({
+          question: entry.question,
+          number: sectionQuestionNumber(partIndex, entry.questionIndex)
+        }))
+      }));
+  }
+
+  function formatQuestionRange(entries) {
+    const numbers = entries.map(entry => entry.number);
+    if (!numbers.length) return "";
+    if (numbers.length === 1) return `Question ${numbers[0]}`;
+    if (numbers.length === 2 && numbers[1] === numbers[0] + 1) return `Questions ${numbers[0]} and ${numbers[1]}`;
+    return `Questions ${numbers[0]} - ${numbers[numbers.length - 1]}`;
+  }
+
+  function richLabelIncludesQuestionRange(html) {
+    const scratch = document.createElement("div");
+    scratch.innerHTML = String(html || "");
+    return /\bquestions?\s+\d+/i.test(scratch.textContent || "");
+  }
+
+  // Capture the visible controls directly before every navigation or submission.
+  // This protects answers even if a browser delays an input/change event while Skip is clicked.
+  function syncVisibleAnswers() {
+    const pane = document.getElementById("runnerQuestionsPane");
+    const part = runner.parts[runner.partIndex];
+    if (!pane || !part) return;
+
+    const answers = currentAnswers();
+    (part.questions || []).forEach(question => {
+      const block = document.getElementById("qblock-" + question.id);
+      if (!block) return;
+
+      if (question.type === "fill") {
+        const input = block.querySelector(".q-fill-input");
+        if (input) answers[question.id] = input.value;
+        return;
+      }
+
+      const selected = Array.from(block.querySelectorAll(".q-option.selected"))
+        .map(option => option.dataset.val);
+
+      if (question.type === "multi") {
+        if (selected.length) answers[question.id] = selected;
+        else delete answers[question.id];
+      } else if (selected.length) {
+        answers[question.id] = selected[0];
+      } else {
+        delete answers[question.id];
+      }
+    });
+
+    saveSession(session);
+  }
 
   function updateSubmitGate() {
     const btn = document.getElementById("btnSubmitSection");
     const isLastPart = runner.partIndex === runner.parts.length - 1;
+
     if (runner.section === "listening") {
       btn.disabled = !(isLastPart && runner.lastPartMediaReady);
-      btn.title = btn.disabled ? "Finish listening to the final part before submitting" : "";
+      btn.title = btn.disabled ? "Finish or skip the final listening part before submitting" : "";
     } else {
-      btn.disabled = false; // Reading has no audio-order constraint — free navigation
+      btn.disabled = false;
       btn.title = "";
     }
   }
 
-  function renderRunnerPart(partIdx) {
+  function moveToPart(partIdx) {
+    syncVisibleAnswers();
+    renderRunnerPart(partIdx, false);
+  }
+
+  function renderRunnerPart(partIdx, syncCurrent = true) {
+    if (syncCurrent) syncVisibleAnswers();
+
     const part = runner.parts[partIdx];
+    if (!part) return;
+
     runner.partIndex = partIdx;
     runner.lastPartMediaReady = false;
     const isLastPart = partIdx === runner.parts.length - 1;
+
     document.getElementById("runnerPartLabel").textContent =
       `${runner.section === "listening" ? "Part" : "Passage"} ${partIdx + 1} of ${runner.parts.length} — ${part.title}`;
 
@@ -52,44 +242,61 @@ document.addEventListener("DOMContentLoaded", async function () {
             <button class="btn btn-ghost btn-sm" id="audioSkipBtn">Skip This Part</button>
             <div class="audio-status" id="audioStatus" style="display:none;"></div>
           </div>
-          <audio id="listeningAudioEl" preload="auto" src="${part.audio}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
+          <audio id="listeningAudioEl" preload="auto" src="${escapeAttribute(part.audio || "")}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
           <div id="nextPartWrap" style="display:none;margin-top:18px;">
             ${isLastPart
               ? `<p class="muted small">This was the final Listening part. Use <strong>Submit Section</strong> above when you're ready to move on to Reading.</p>`
               : `<button class="btn btn-primary" id="btnNextPart">Next Part &rarr;</button>`}
           </div>
         </div>`;
-      wireAudioPlayer(part, isLastPart);
+      wireAudioPlayer(part);
     } else {
       passagePane.innerHTML = `
-        <h3>${part.title}</h3>${part.passage}
+        ${hasRichContent(part.intro) ? `<div class="reading-passage-intro exam-rich-content">${part.intro}</div>` : ""}
+        <h3>${part.title}</h3>
+        <div class="reading-passage-body exam-rich-content">${part.passage || ""}</div>
         <div class="passage-nav" style="margin-top:20px;display:flex;gap:10px;">
           ${partIdx > 0 ? `<button class="btn btn-ghost btn-sm" id="btnPrevPassage">&larr; Previous Passage</button>` : ""}
           ${!isLastPart ? `<button class="btn btn-primary btn-sm" id="btnNextPassage">Next Passage &rarr;</button>` : ""}
         </div>`;
+
       const prevBtn = document.getElementById("btnPrevPassage");
       const nextBtn = document.getElementById("btnNextPassage");
-      if (prevBtn) prevBtn.addEventListener("click", () => renderRunnerPart(partIdx - 1));
-      if (nextBtn) nextBtn.addEventListener("click", () => renderRunnerPart(partIdx + 1));
+      if (prevBtn) prevBtn.addEventListener("click", () => moveToPart(partIdx - 1));
+      if (nextBtn) nextBtn.addEventListener("click", () => moveToPart(partIdx + 1));
     }
 
     const qPane = document.getElementById("runnerQuestionsPane");
     qPane.innerHTML = "";
-    part.questions.forEach((q, i) => qPane.appendChild(renderQuestionBlock(q, i)));
-    renderNavBubbles(part.questions);
+    displayQuestionGroups(part, partIdx).forEach(group => {
+      const section = document.createElement("section");
+      section.className = "exam-question-group";
+      const range = formatQuestionRange(group.entries);
+      const showAutomaticRange = range && !richLabelIncludesQuestionRange(group.label);
+      if (showAutomaticRange || hasRichContent(group.label)) {
+        const label = document.createElement("div");
+        label.className = "exam-question-group-label";
+        label.innerHTML = `
+          ${showAutomaticRange ? `<div class="exam-question-range">${range}</div>` : ""}
+          ${hasRichContent(group.label) ? `<div class="exam-rich-content">${group.label}</div>` : ""}`;
+        section.appendChild(label);
+      }
+      group.entries.forEach(entry => section.appendChild(renderQuestionBlock(entry.question, entry.number)));
+      qPane.appendChild(section);
+    });
+    renderNavBubbles(part.questions || [], partIdx);
     updateSubmitGate();
   }
 
-  function wireAudioPlayer(part, isLastPart) {
+  function wireAudioPlayer(part) {
     const audioEl = document.getElementById("listeningAudioEl");
     const playBtn = document.getElementById("audioPlayBtn");
     const skipBtn = document.getElementById("audioSkipBtn");
     const statusEl = document.getElementById("audioStatus");
     const nextWrap = document.getElementById("nextPartWrap");
 
-    audioEl.addEventListener("contextmenu", (e) => e.preventDefault());
+    audioEl.addEventListener("contextmenu", event => event.preventDefault());
 
-    // Defensive anti-seek: audio has no visible scrub bar, but block programmatic/keyboard seeking too.
     let lastAllowedTime = 0;
     audioEl.addEventListener("timeupdate", () => { lastAllowedTime = audioEl.currentTime; });
     audioEl.addEventListener("seeking", () => {
@@ -109,9 +316,11 @@ document.addEventListener("DOMContentLoaded", async function () {
       });
       playBtn.style.display = "none";
       statusEl.style.display = "block";
-      statusEl.textContent = "&#9654; Playing…".replace("&#9654;", "▶");
+      statusEl.textContent = "▶ Playing…";
     });
+
     skipBtn.addEventListener("click", () => {
+      syncVisibleAnswers();
       if (!confirm("Skip this listening part? You won't be able to come back to it once you move on.")) return;
       audioEl.pause();
       playBtn.style.display = "none";
@@ -120,107 +329,131 @@ document.addEventListener("DOMContentLoaded", async function () {
       statusEl.textContent = "⏭ Part skipped";
       onMediaReady();
     });
+
     audioEl.addEventListener("ended", () => {
+      syncVisibleAnswers();
       statusEl.textContent = "✓ Finished playing";
       skipBtn.style.display = "none";
       onMediaReady();
     });
+
     audioEl.addEventListener("error", () => {
+      syncVisibleAnswers();
       statusEl.style.display = "block";
-      statusEl.textContent = `⚠ Audio file not found at ${part.audio} — add it to assets/audio/ in the repo.`;
+      statusEl.textContent = `⚠ Audio file not found at ${part.audio || "the configured path"}.`;
       playBtn.style.display = "none";
       skipBtn.style.display = "none";
-      onMediaReady(); // don't let a missing file block the exam
+      onMediaReady();
     });
 
-    const btnNextPart = document.getElementById("btnNextPart");
-    if (btnNextPart) btnNextPart.addEventListener("click", () => renderRunnerPart(runner.partIndex + 1));
+    const nextBtn = document.getElementById("btnNextPart");
+    if (nextBtn) nextBtn.addEventListener("click", () => moveToPart(runner.partIndex + 1));
   }
 
-  function renderQuestionBlock(q, i) {
+  function renderQuestionBlock(question, questionNumber) {
     const answers = currentAnswers();
     const block = document.createElement("div");
     block.className = "question-block";
-    block.id = "qblock-" + q.id;
-    let inner = `<div><span class="q-num">${i + 1}.</span>${q.text}${q.type === "multi" ? `<span class="q-hint">(select ${(q.answer || []).length || 2})</span>` : ""}</div>`;
+    block.id = "qblock-" + question.id;
 
-    if (q.type === "mc" || q.type === "tfng") {
-      const selected = answers[q.id];
+    let inner = `<div><span class="q-num">${questionNumber}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint">(select ${(question.answer || []).length || 2})</span>` : ""}</div>`;
+
+    if (question.type === "mc" || question.type === "tfng") {
+      const selected = answers[question.id];
       inner += `<div class="q-options">`;
-      q.options.forEach(opt => {
-        const sel = selected === opt ? "selected" : "";
-        inner += `<div class="q-option mc-opt ${sel}" data-qid="${q.id}" data-val="${opt}"><span class="box"></span>${opt}</div>`;
+      (question.options || []).forEach(option => {
+        const isSelected = selected === option ? "selected" : "";
+        inner += `<div class="q-option mc-opt ${isSelected}" data-qid="${escapeAttribute(question.id)}" data-val="${escapeAttribute(option)}"><span class="box"></span>${option}</div>`;
       });
       inner += `</div>`;
-    } else if (q.type === "multi") {
-      const selectedArr = Array.isArray(answers[q.id]) ? answers[q.id] : [];
+    } else if (question.type === "multi") {
+      const selectedAnswers = Array.isArray(answers[question.id]) ? answers[question.id] : [];
       inner += `<div class="q-options">`;
-      (q.options || []).forEach(opt => {
-        const sel = selectedArr.includes(opt) ? "selected" : "";
-        inner += `<div class="q-option multi-opt ${sel}" data-qid="${q.id}" data-val="${opt}" data-multi="1"><span class="box"></span>${opt}</div>`;
+      (question.options || []).forEach(option => {
+        const isSelected = selectedAnswers.includes(option) ? "selected" : "";
+        inner += `<div class="q-option multi-opt ${isSelected}" data-qid="${escapeAttribute(question.id)}" data-val="${escapeAttribute(option)}" data-multi="1"><span class="box"></span>${option}</div>`;
       });
       inner += `</div>`;
-    } else if (q.type === "fill") {
-      const val = answers[q.id] || "";
-      inner += `<input type="text" class="q-fill-input" data-qid="${q.id}" value="${val}" placeholder="Your answer">`;
+    } else if (question.type === "fill") {
+      const value = answers[question.id] || "";
+      inner += `<input type="text" class="q-fill-input" data-qid="${escapeAttribute(question.id)}" value="${escapeAttribute(value)}" placeholder="Your answer" autocomplete="off">`;
     }
+
     block.innerHTML = inner;
     return block;
   }
 
-  document.getElementById("runnerQuestionsPane").addEventListener("click", (e) => {
-    const opt = e.target.closest(".q-option");
-    if (!opt) return;
+  document.getElementById("runnerQuestionsPane").addEventListener("click", event => {
+    const option = event.target.closest(".q-option");
+    if (!option) return;
+
     const answers = currentAnswers();
-    if (opt.dataset.multi) {
-      const arr = Array.isArray(answers[opt.dataset.qid]) ? answers[opt.dataset.qid] : [];
-      const idx = arr.indexOf(opt.dataset.val);
-      if (idx >= 0) arr.splice(idx, 1); else arr.push(opt.dataset.val);
-      answers[opt.dataset.qid] = arr;
-      opt.classList.toggle("selected", arr.includes(opt.dataset.val));
+    if (option.dataset.multi) {
+      const selected = Array.isArray(answers[option.dataset.qid]) ? [...answers[option.dataset.qid]] : [];
+      const index = selected.indexOf(option.dataset.val);
+      if (index >= 0) selected.splice(index, 1);
+      else selected.push(option.dataset.val);
+      answers[option.dataset.qid] = selected;
+      option.classList.toggle("selected", selected.includes(option.dataset.val));
     } else {
-      answers[opt.dataset.qid] = opt.dataset.val;
-      document.querySelectorAll(`.q-option[data-qid="${opt.dataset.qid}"]`).forEach(el => el.classList.remove("selected"));
-      opt.classList.add("selected");
+      answers[option.dataset.qid] = option.dataset.val;
+      document.querySelectorAll(".q-option").forEach(element => {
+        if (element.dataset.qid === option.dataset.qid) element.classList.remove("selected");
+      });
+      option.classList.add("selected");
     }
-    saveSession(session);
-    updateNavBubbles();
-  });
-  document.getElementById("runnerQuestionsPane").addEventListener("input", (e) => {
-    if (!e.target.classList.contains("q-fill-input")) return;
-    currentAnswers()[e.target.dataset.qid] = e.target.value;
+
     saveSession(session);
     updateNavBubbles();
   });
 
-  function renderNavBubbles(questions) {
+  document.getElementById("runnerQuestionsPane").addEventListener("input", event => {
+    if (!event.target.classList.contains("q-fill-input")) return;
+    currentAnswers()[event.target.dataset.qid] = event.target.value;
+    saveSession(session);
+    updateNavBubbles();
+  });
+
+  function renderNavBubbles(questions, partIndex = runner.partIndex) {
     const wrap = document.getElementById("navBubbles");
     wrap.innerHTML = "";
     const answers = currentAnswers();
-    questions.forEach((q, i) => {
-      const has = Array.isArray(answers[q.id]) ? answers[q.id].length > 0 : !!answers[q.id];
-      const b = document.createElement("div");
-      b.className = "nav-bubble" + (has ? " answered" : "");
-      b.textContent = i + 1;
-      b.title = "Jump to question " + (i + 1);
-      b.addEventListener("click", () => document.getElementById("qblock-" + q.id).scrollIntoView({ behavior: "smooth", block: "center" }));
-      wrap.appendChild(b);
+
+    questions.forEach((question, index) => {
+      const questionNumber = sectionQuestionNumber(partIndex, index);
+      const value = answers[question.id];
+      const hasAnswer = Array.isArray(value) ? value.length > 0 : normalizeAnswer(value).length > 0;
+      const bubble = document.createElement("div");
+      bubble.className = "nav-bubble" + (hasAnswer ? " answered" : "");
+      bubble.textContent = questionNumber;
+      bubble.title = "Jump to question " + questionNumber;
+      bubble.addEventListener("click", () => document.getElementById("qblock-" + question.id).scrollIntoView({ behavior: "smooth", block: "center" }));
+      wrap.appendChild(bubble);
     });
   }
-  function updateNavBubbles() { renderNavBubbles(runner.parts[runner.partIndex].questions); }
+
+  function updateNavBubbles() {
+    const part = runner.parts[runner.partIndex];
+    if (part) renderNavBubbles(part.questions || [], runner.partIndex);
+  }
 
   document.getElementById("btnSubmitSection").addEventListener("click", () => {
+    syncVisibleAnswers();
     if (confirm("Submit this section? You cannot return to it once submitted.")) submitSection();
   });
 
   function submitSection() {
+    syncVisibleAnswers();
     clearTimer();
+
     if (runner.section === "listening") {
-      session.listeningScore = scoreSection(exam.listening, session.listeningAnswers);
+      session.listeningScore = scoreExamSection(exam.listening || [], session.listeningAnswers || {});
+      session.scoringVersion = 2;
       saveSession(session);
       startSection("reading");
     } else {
-      session.readingScore = scoreSection(exam.reading, session.readingAnswers);
+      session.readingScore = scoreExamSection(exam.reading || [], session.readingAnswers || {});
+      session.scoringVersion = 2;
       saveSession(session);
       window.location.href = "student-writing.html";
     }
@@ -228,17 +461,28 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function startTimer(displayId, onExpire) {
     clearTimer();
-    const el = document.getElementById(displayId);
+    const element = document.getElementById(displayId);
+
     const tick = () => {
-      const m = Math.floor(runner.timerSeconds / 60).toString().padStart(2, "0");
-      const s = (runner.timerSeconds % 60).toString().padStart(2, "0");
-      el.textContent = `${m}:${s}`;
-      el.classList.toggle("urgent", runner.timerSeconds <= 300);
-      if (runner.timerSeconds <= 0) { clearTimer(); onExpire(); return; }
-      runner.timerSeconds--;
+      const minutes = Math.floor(runner.timerSeconds / 60).toString().padStart(2, "0");
+      const seconds = (runner.timerSeconds % 60).toString().padStart(2, "0");
+      element.textContent = `${minutes}:${seconds}`;
+      element.classList.toggle("urgent", runner.timerSeconds <= 300);
+
+      if (runner.timerSeconds <= 0) {
+        clearTimer();
+        onExpire();
+        return;
+      }
+      runner.timerSeconds -= 1;
     };
+
     tick();
     runner.timerHandle = setInterval(tick, 1000);
   }
-  function clearTimer() { if (runner.timerHandle) clearInterval(runner.timerHandle); runner.timerHandle = null; }
+
+  function clearTimer() {
+    if (runner.timerHandle) clearInterval(runner.timerHandle);
+    runner.timerHandle = null;
+  }
 });
