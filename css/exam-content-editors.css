@@ -1,0 +1,193 @@
+/* Rich question-group authoring and student presentation. Loaded by the builder/runner scripts. */
+.enhanced-builder-card {
+  overflow: visible;
+}
+
+.builder-field-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.builder-help,
+.answer-help {
+  margin: -2px 0 8px;
+  line-height: 1.45;
+}
+
+.builder-help code,
+.answer-help code {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.question-groups-wrap {
+  display: grid;
+  gap: 18px;
+  margin: 20px 0 14px;
+}
+
+.question-group-editor-card {
+  padding: 16px;
+  border: 1px solid rgba(42, 53, 72, 0.16);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.question-group-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.question-group-editor-head > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.question-range-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(26, 104, 115, 0.11);
+  color: #145d67;
+  font-size: 0.77rem;
+  font-weight: 700;
+}
+
+.question-label-editor .ql-editor,
+.compact-rich-editor .ql-editor {
+  min-height: 112px;
+}
+
+.passage-rich-editor .ql-editor {
+  min-height: 360px;
+}
+
+.rich-editor .ql-editor.ql-blank::before {
+  white-space: pre-line;
+  line-height: 1.55;
+}
+
+.rich-editor .ql-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px auto;
+  border-radius: 8px;
+}
+
+.enhanced-question-row {
+  margin-top: 13px;
+  background: #fff;
+}
+
+.exam-question-group {
+  margin: 0 0 24px;
+}
+
+.exam-question-group-label {
+  margin: 0 0 14px;
+  padding: 15px 17px;
+  border-left: 4px solid #d9aa24;
+  border-radius: 0 10px 10px 0;
+  background: rgba(255, 248, 224, 0.76);
+}
+
+.exam-question-range {
+  margin-bottom: 7px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.exam-rich-content {
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+}
+
+.exam-rich-content > :first-child {
+  margin-top: 0;
+}
+
+.exam-rich-content > :last-child {
+  margin-bottom: 0;
+}
+
+.exam-rich-content h2,
+.exam-rich-content h3 {
+  margin: 1.1em 0 0.45em;
+}
+
+.exam-rich-content ul,
+.exam-rich-content ol {
+  padding-left: 1.45rem;
+}
+
+.exam-rich-content blockquote {
+  margin: 1rem 0;
+  padding: 0.7rem 1rem;
+  border-left: 4px solid rgba(26, 104, 115, 0.45);
+  background: rgba(26, 104, 115, 0.06);
+}
+
+.exam-rich-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px auto;
+  border-radius: 8px;
+}
+
+.exam-rich-content table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+.exam-rich-content th,
+.exam-rich-content td {
+  padding: 9px 11px;
+  border: 1px solid rgba(42, 53, 72, 0.25);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reading-passage-intro {
+  margin-bottom: 18px;
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: rgba(26, 104, 115, 0.07);
+  font-weight: 600;
+}
+
+.reading-passage-body {
+  line-height: 1.75;
+}
+
+@media (max-width: 720px) {
+  .question-group-editor-card {
+    padding: 13px;
+  }
+
+  .question-group-editor-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .question-group-editor-head .btn {
+    align-self: flex-end;
+  }
+
+  .passage-rich-editor .ql-editor {
+    min-height: 260px;
+  }
+}
