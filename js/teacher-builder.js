@@ -9,9 +9,11 @@ document.addEventListener("DOMContentLoaded", function () {
     let workingExam = null;
     let hasUnsavedChanges = false;
     let listeningGroupQuills = {};
+    let listeningLabelQuills = {};
     let readingPassageQuills = {};
     let readingIntroQuills = {};
     let readingGroupQuills = {};
+    let readingLabelQuills = {};
 
     const GROUP_LABEL_PLACEHOLDER = [
       "Questions 1 - 10",
@@ -90,11 +92,13 @@ document.addEventListener("DOMContentLoaded", function () {
       // viewport and let the editable surface scroll internally.
       const editorHeight = element.classList.contains("passage-rich-editor")
         ? 360
-        : element.classList.contains("compact-rich-editor")
-          ? 120
-          : element.classList.contains("question-label-editor")
-            ? 150
-            : 140;
+        : element.classList.contains("label-block-editor")
+          ? 110
+          : element.classList.contains("compact-rich-editor")
+            ? 120
+            : element.classList.contains("question-label-editor")
+              ? 150
+              : 140;
       element.style.setProperty("height", `${editorHeight}px`, "important");
       element.style.setProperty("min-height", `${editorHeight}px`, "important");
       element.style.setProperty("max-height", `${editorHeight}px`, "important");
@@ -206,25 +210,47 @@ document.addEventListener("DOMContentLoaded", function () {
       workingExam.reading.forEach((part, index) => normalizeQuestionGroups(part, `r${index + 1}`));
     }
 
+    function questionWeight(question) {
+      if (!question || question.type === "label") return 0;
+      if (question.type === "multi") {
+        const count = Array.isArray(question.answer) ? question.answer.length : 0;
+        return count > 0 ? count : 2;
+      }
+      return 1;
+    }
+
     function sectionQuestionNumber(parts, partIndex, questionIndex) {
       let count = 0;
       for (let index = 0; index < partIndex; index += 1) {
-        count += (parts[index].questions || []).length;
+        count += (parts[index].questions || []).reduce((sum, question) => sum + questionWeight(question), 0);
       }
-      return count + questionIndex + 1;
+      const currentQuestions = parts[partIndex].questions || [];
+      for (let index = 0; index < questionIndex; index += 1) {
+        count += questionWeight(currentQuestions[index]);
+      }
+      return count + 1;
     }
 
     function questionRangeText(parts, partIndex, group) {
       const part = parts[partIndex];
       const indexById = new Map((part.questions || []).map((question, index) => [question.id, index]));
-      const numbers = (group.questionIds || [])
-        .map(id => indexById.has(id) ? sectionQuestionNumber(parts, partIndex, indexById.get(id)) : null)
-        .filter(number => number !== null);
+      const numbers = [];
+      (group.questionIds || []).forEach(id => {
+        if (!indexById.has(id)) return;
+        const questionIndex = indexById.get(id);
+        const question = part.questions[questionIndex];
+        const weight = questionWeight(question);
+        if (weight <= 0) return; // labels contribute no question numbers
+        const start = sectionQuestionNumber(parts, partIndex, questionIndex);
+        for (let offset = 0; offset < weight; offset += 1) numbers.push(start + offset);
+      });
 
       if (!numbers.length) return "No questions yet";
       if (numbers.length === 1) return `Question ${numbers[0]}`;
-      if (numbers.length === 2 && numbers[1] === numbers[0] + 1) return `Questions ${numbers[0]} and ${numbers[1]}`;
-      return `Questions ${numbers[0]} - ${numbers[numbers.length - 1]}`;
+      const first = numbers[0];
+      const last = numbers[numbers.length - 1];
+      if (numbers.length === 2 && last === first + 1) return `Questions ${first} and ${last}`;
+      return `Questions ${first} - ${last}`;
     }
 
     function questionsForGroup(part, group) {
@@ -264,6 +290,12 @@ document.addEventListener("DOMContentLoaded", function () {
         const group = part && (part.questionGroups || []).find(item => item.id === meta.groupId);
         if (group) group.label = cleanRichHtml(meta.quill.root.innerHTML);
       });
+      Object.keys(listeningLabelQuills).forEach(key => {
+        const meta = listeningLabelQuills[key];
+        const part = workingExam.listening[meta.partIndex];
+        const question = part && (part.questions || []).find(item => item.id === meta.questionId);
+        if (question) question.text = cleanRichHtml(meta.quill.root.innerHTML);
+      });
       workingExam.listening.forEach(syncPartQuestionOrder);
     }
 
@@ -282,17 +314,25 @@ document.addEventListener("DOMContentLoaded", function () {
         const group = part && (part.questionGroups || []).find(item => item.id === meta.groupId);
         if (group) group.label = cleanRichHtml(meta.quill.root.innerHTML);
       });
+      Object.keys(readingLabelQuills).forEach(key => {
+        const meta = readingLabelQuills[key];
+        const part = workingExam.reading[meta.partIndex];
+        const question = part && (part.questions || []).find(item => item.id === meta.questionId);
+        if (question) question.text = cleanRichHtml(meta.quill.root.innerHTML);
+      });
       workingExam.reading.forEach(syncPartQuestionOrder);
     }
 
     function resetListeningQuills() {
       listeningGroupQuills = {};
+      listeningLabelQuills = {};
     }
 
     function resetReadingQuills() {
       readingPassageQuills = {};
       readingIntroQuills = {};
       readingGroupQuills = {};
+      readingLabelQuills = {};
     }
 
     async function populateExamSelect() {
@@ -369,7 +409,10 @@ document.addEventListener("DOMContentLoaded", function () {
         <p class="muted small builder-help">The question range is calculated automatically. Format the task directions here; use the image button for maps, diagrams, or table screenshots stored in the repository.</p>
         <div class="rich-editor question-label-editor" data-group-editor="${group.id}"></div>
         <div data-group-questions="${group.id}"></div>
-        <button class="btn btn-ghost btn-sm" type="button" data-add-group-question="${group.id}">+ Add Question to This Group</button>`;
+        <div class="builder-add-row">
+          <button class="btn btn-ghost btn-sm" type="button" data-add-group-question="${group.id}">+ Add Question to This Group</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-add-group-label="${group.id}">+ Add Label / Text Block</button>
+        </div>`;
       card.appendChild(groupCard);
 
       const editorElement = groupCard.querySelector(`[data-group-editor="${group.id}"]`);
@@ -388,6 +431,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
       const questionContainer = groupCard.querySelector(`[data-group-questions="${group.id}"]`);
       renderQuestionEditors(questionContainer, questionsForGroup(part, group), {
+        section,
+        partIndex,
         onDelete: question => {
           removeQuestion(part, group, question.id);
           markDirty();
@@ -399,6 +444,15 @@ document.addEventListener("DOMContentLoaded", function () {
         const question = { id: makeId(section === "listening" ? "lq" : "rq"), type: "fill", text: "", answer: "" };
         part.questions.push(question);
         group.questionIds.push(question.id);
+        syncPartQuestionOrder(part);
+        markDirty();
+        refresh();
+      });
+
+      groupCard.querySelector(`[data-add-group-label="${group.id}"]`).addEventListener("click", () => {
+        const label = { id: makeId(section === "listening" ? "ll" : "rl"), type: "label", text: "" };
+        part.questions.push(label);
+        group.questionIds.push(label.id);
         syncPartQuestionOrder(part);
         markDirty();
         refresh();
@@ -590,12 +644,26 @@ document.addEventListener("DOMContentLoaded", function () {
     function renderQuestionEditors(container, questions, config = {}) {
       container.innerHTML = "";
       questions.forEach((question, questionIndex) => {
+        if (question.type === "label") {
+          const row = document.createElement("div");
+          row.className = "builder-question-row enhanced-question-row label-question-row";
+          row.innerHTML = `
+            <div style="flex:1;">
+              <label class="builder-field-label" style="margin-top:0;">Label / text block (not a question — not scored)</label>
+              <div class="rich-editor label-block-editor" data-label-editor="${question.id}"></div>
+            </div>
+            <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>`;
+          container.appendChild(row);
+          return;
+        }
+
         const isMultipleChoice = question.type === "mc";
         const isMultipleAnswer = question.type === "multi";
         const optionsValue = Array.isArray(question.options) ? question.options.join(", ") : "";
         const answerValue = Array.isArray(question.answer)
           ? question.answer.join(isMultipleAnswer ? ", " : " | ")
           : (question.answer || "");
+        const multiWeight = isMultipleAnswer ? (Array.isArray(question.answer) && question.answer.length ? question.answer.length : 2) : 0;
         const row = document.createElement("div");
         row.className = "builder-question-row enhanced-question-row";
         row.innerHTML = `
@@ -606,6 +674,7 @@ document.addEventListener("DOMContentLoaded", function () {
               <option value="multi" ${isMultipleAnswer ? "selected" : ""}>Multiple answer (select several)</option>
               <option value="tfng" ${question.type === "tfng" ? "selected" : ""}>True / False / Not Given</option>
             </select>
+            ${isMultipleAnswer ? `<span class="muted small multi-weight-hint">Counts as ${multiWeight} questions in the numbering</span>` : ""}
             <input type="text" class="text-input" placeholder="Question text" value="${escapeAttribute(question.text)}" data-q-text="${questionIndex}">
             ${(isMultipleChoice || isMultipleAnswer)
               ? `<input type="text" class="text-input" placeholder="Options, comma-separated" value="${escapeAttribute(optionsValue)}" data-q-opts="${questionIndex}">`
@@ -619,6 +688,19 @@ document.addEventListener("DOMContentLoaded", function () {
           </div>
           <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>`;
         container.appendChild(row);
+      });
+
+      container.querySelectorAll("[data-label-editor]").forEach(element => {
+        const questionId = element.dataset.labelEditor;
+        const question = questions.find(item => item.id === questionId);
+        if (!question) return;
+        const quill = createRichEditor(
+          element,
+          question.text || "",
+          "Enter instructional text or a sub-heading — this will not be scored (e.g. \"Typical jobs\")."
+        );
+        const map = config.section === "listening" ? listeningLabelQuills : readingLabelQuills;
+        map[questionId] = { quill, partIndex: config.partIndex, questionId };
       });
 
       container.querySelectorAll("[data-q-type]").forEach(select => select.addEventListener("change", event => {

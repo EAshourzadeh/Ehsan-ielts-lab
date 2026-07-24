@@ -136,18 +136,37 @@ function logoutAdmin() {
 }
 
 /* ---------- Scoring ---------- */
+/* ---------- Scoring weight: how many numbered question slots an item occupies.
+   Labels are instructional text, not questions, so they occupy none.
+   A multiple-answer ("choose TWO") question occupies as many slots as it has
+   correct answers (defaulting to 2, matching real IELTS convention). ---------- */
+function questionScoreWeight(question) {
+  if (!question || question.type === "label") return 0;
+  if (question.type === "multi") {
+    const count = Array.isArray(question.answer) ? question.answer.length : 0;
+    return count > 0 ? count : 2;
+  }
+  return 1;
+}
+
 function scoreSection(parts, answers) {
   let total = 0, correct = 0;
-  parts.forEach(part => part.questions.forEach(q => {
-    total++;
-    if (q.type === "multi") {
-      const given = Array.isArray(answers[q.id]) ? [...answers[q.id]].sort() : [];
-      const key = [...(q.answer || [])].sort();
-      if (given.length === key.length && given.every((v, i) => v === key[i])) correct++;
+  (parts || []).forEach(part => (part.questions || []).forEach(question => {
+    const weight = questionScoreWeight(question);
+    if (weight <= 0) return; // labels are not scored
+    total += weight;
+    if (question.type === "multi") {
+      const given = Array.isArray(answers[question.id]) ? answers[question.id] : [];
+      const key = Array.isArray(question.answer) ? question.answer : [];
+      const matched = given.filter(value => key.includes(value)).length;
+      correct += Math.min(matched, weight);
     } else {
-      const given = (answers[q.id] || "").toString().trim().toLowerCase();
-      const key = (q.answer || "").toString().trim().toLowerCase();
-      if (given && given === key) correct++;
+      const given = (answers[question.id] || "").toString().trim().toLowerCase();
+      // question.answer may be a single string OR an array of accepted alternatives
+      // (teachers enter "10 | ten" in the builder to accept either spelling).
+      const accepted = Array.isArray(question.answer) ? question.answer : [question.answer];
+      const isMatch = given.length > 0 && accepted.some(key => given === (key || "").toString().trim().toLowerCase());
+      if (isMatch) correct += 1;
     }
   }));
   return { correct, total };

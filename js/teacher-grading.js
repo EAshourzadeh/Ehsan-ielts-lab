@@ -120,13 +120,49 @@ document.addEventListener("DOMContentLoaded", function () {
       return accepted.some(answer => normalizeAnswer(answer) === given) ? "correct" : "wrong";
     }
 
+    function questionScoreWeight(question) {
+      if (!question || question.type === "label") return 0;
+      if (question.type === "multi") {
+        const count = Array.isArray(question.answer) ? question.answer.length : 0;
+        return count > 0 ? count : 2;
+      }
+      return 1;
+    }
+
+    function sectionQuestionNumber(parts, partIndex, questionIndex) {
+      let count = 0;
+      for (let index = 0; index < partIndex; index += 1) {
+        count += (parts[index].questions || []).reduce((sum, question) => sum + questionScoreWeight(question), 0);
+      }
+      const currentQuestions = parts[partIndex].questions || [];
+      for (let index = 0; index < questionIndex; index += 1) {
+        count += questionScoreWeight(currentQuestions[index]);
+      }
+      return count + 1;
+    }
+
+    function multiMatch(question, givenAnswer) {
+      const given = Array.isArray(givenAnswer) ? givenAnswer : [];
+      const key = Array.isArray(question.answer) ? question.answer : [];
+      const weight = questionScoreWeight(question);
+      const matched = Math.min(given.filter(value => key.includes(value)).length, weight);
+      return { matched, weight, isBlank: given.length === 0 };
+    }
+
     function scoreObjectiveSection(parts, answers) {
       let correct = 0;
       let total = 0;
       (parts || []).forEach(part => {
         (part.questions || []).forEach(question => {
-          total += 1;
-          if (answerStatus(question, (answers || {})[question.id]) === "correct") correct += 1;
+          const weight = questionScoreWeight(question);
+          if (weight <= 0) return; // labels are instructional text, not scored
+          total += weight;
+          const given = (answers || {})[question.id];
+          if (question.type === "multi") {
+            correct += multiMatch(question, given).matched;
+          } else if (answerStatus(question, given) === "correct") {
+            correct += 1;
+          }
         });
       });
       return { correct, total };
@@ -151,7 +187,7 @@ document.addEventListener("DOMContentLoaded", function () {
         readingBand: reading.band,
         listeningEquivalentRaw40: listening.equivalentRaw40,
         readingEquivalentRaw40: reading.equivalentRaw40,
-        scoringVersion: 2
+        scoringVersion: 3
       };
     }
 
@@ -240,24 +276,46 @@ document.addEventListener("DOMContentLoaded", function () {
 
       const rows = [];
       const counts = { correct: 0, wrong: 0, blank: 0 };
-      let questionNumber = 0;
 
       parts.forEach((part, partIndex) => {
-        (part.questions || []).forEach(question => {
-          questionNumber += 1;
+        (part.questions || []).forEach((question, questionIndex) => {
+          if (question.type === "label") return; // instructional text — not a scored question
+
+          const weight = questionScoreWeight(question);
+          const startNumber = sectionQuestionNumber(parts, partIndex, questionIndex);
+          const numberLabel = weight > 1 ? `${startNumber}-${startNumber + weight - 1}` : String(startNumber);
           const given = (answers || {})[question.id];
-          const status = answerStatus(question, given);
-          counts[status] += 1;
+
+          let statusLabel;
+          let statusClass;
+          if (question.type === "multi") {
+            const { matched, isBlank } = multiMatch(question, given);
+            if (isBlank) {
+              statusLabel = "blank"; statusClass = "blank"; counts.blank += weight;
+            } else if (matched === weight) {
+              statusLabel = "correct"; statusClass = "correct"; counts.correct += weight;
+            } else if (matched === 0) {
+              statusLabel = "wrong"; statusClass = "wrong"; counts.wrong += weight;
+            } else {
+              statusLabel = `${matched}/${weight} correct`; statusClass = "partial";
+              counts.correct += matched; counts.wrong += (weight - matched);
+            }
+          } else {
+            statusLabel = answerStatus(question, given);
+            statusClass = statusLabel;
+            counts[statusLabel] += 1;
+          }
+
           rows.push(`
             <tr>
-              <td class="answer-number">${questionNumber}</td>
+              <td class="answer-number">${numberLabel}</td>
               <td>
-                <div class="answer-question">${escapeHtml(question.text || `Question ${questionNumber}`)}</div>
+                <div class="answer-question">${escapeHtml(question.text || `Question ${numberLabel}`)}</div>
                 <div class="answer-part-label">${escapeHtml(part.title || `${title} ${partIndex + 1}`)}</div>
               </td>
               <td class="answer-value">${displayAnswer(given)}</td>
               <td class="answer-value correct-key">${displayAnswer(question.answer, "No key")}</td>
-              <td><span class="answer-status ${status}">${status}</span></td>
+              <td><span class="answer-status ${statusClass}">${statusLabel}</span></td>
             </tr>`);
         });
       });

@@ -61,38 +61,6 @@ document.addEventListener("DOMContentLoaded", async function () {
       .toLocaleLowerCase();
   }
 
-  function questionIsCorrect(question, givenAnswer) {
-    if (question.type === "multi") {
-      const given = (Array.isArray(givenAnswer) ? givenAnswer : [])
-        .map(normalizeAnswer)
-        .filter(Boolean)
-        .sort();
-      const key = (Array.isArray(question.answer) ? question.answer : [])
-        .map(normalizeAnswer)
-        .filter(Boolean)
-        .sort();
-      return given.length === key.length && given.every((value, index) => value === key[index]);
-    }
-
-    const given = normalizeAnswer(givenAnswer);
-    const accepted = Array.isArray(question.answer) ? question.answer : [question.answer];
-    return Boolean(given) && accepted.some(answer => normalizeAnswer(answer) === given);
-  }
-
-  function scoreExamSection(parts, answers) {
-    let total = 0;
-    let correct = 0;
-
-    (parts || []).forEach(part => {
-      (part.questions || []).forEach(question => {
-        total += 1;
-        if (questionIsCorrect(question, answers[question.id])) correct += 1;
-      });
-    });
-
-    return { correct, total };
-  }
-
   function escapeAttribute(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -115,12 +83,25 @@ document.addEventListener("DOMContentLoaded", async function () {
     return Boolean(value && value !== "<p><br></p>");
   }
 
+  function questionWeight(question) {
+    if (!question || question.type === "label") return 0;
+    if (question.type === "multi") {
+      const count = Array.isArray(question.answer) ? question.answer.length : 0;
+      return count > 0 ? count : 2;
+    }
+    return 1;
+  }
+
   function sectionQuestionNumber(partIndex, questionIndex) {
     let count = 0;
     for (let index = 0; index < partIndex; index += 1) {
-      count += (runner.parts[index].questions || []).length;
+      count += (runner.parts[index].questions || []).reduce((sum, question) => sum + questionWeight(question), 0);
     }
-    return count + questionIndex + 1;
+    const currentQuestions = runner.parts[partIndex].questions || [];
+    for (let index = 0; index < questionIndex; index += 1) {
+      count += questionWeight(currentQuestions[index]);
+    }
+    return count + 1;
   }
 
   function displayQuestionGroups(part, partIndex) {
@@ -151,19 +132,31 @@ document.addEventListener("DOMContentLoaded", async function () {
       .filter(group => group.entries.length || hasRichContent(group.label))
       .map(group => ({
         label: group.label,
-        entries: group.entries.map(entry => ({
-          question: entry.question,
-          number: sectionQuestionNumber(partIndex, entry.questionIndex)
-        }))
+        entries: group.entries.map(entry => {
+          const weight = questionWeight(entry.question);
+          const start = sectionQuestionNumber(partIndex, entry.questionIndex);
+          return {
+            question: entry.question,
+            number: start,
+            endNumber: weight > 1 ? start + weight - 1 : start
+          };
+        })
       }));
   }
 
   function formatQuestionRange(entries) {
-    const numbers = entries.map(entry => entry.number);
+    const numbers = [];
+    entries.forEach(entry => {
+      const weight = questionWeight(entry.question);
+      if (weight <= 0) return; // labels contribute no question numbers
+      for (let offset = 0; offset < weight; offset += 1) numbers.push(entry.number + offset);
+    });
     if (!numbers.length) return "";
     if (numbers.length === 1) return `Question ${numbers[0]}`;
-    if (numbers.length === 2 && numbers[1] === numbers[0] + 1) return `Questions ${numbers[0]} and ${numbers[1]}`;
-    return `Questions ${numbers[0]} - ${numbers[numbers.length - 1]}`;
+    const first = numbers[0];
+    const last = numbers[numbers.length - 1];
+    if (numbers.length === 2 && last === first + 1) return `Questions ${first} and ${last}`;
+    return `Questions ${first} - ${last}`;
   }
 
   function richLabelIncludesQuestionRange(html) {
@@ -320,7 +313,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           ${hasRichContent(group.label) ? `<div class="exam-rich-content">${group.label}</div>` : ""}`;
         section.appendChild(label);
       }
-      group.entries.forEach(entry => section.appendChild(renderQuestionBlock(entry.question, entry.number)));
+      group.entries.forEach(entry => section.appendChild(renderQuestionBlock(entry.question, entry.number, entry.endNumber)));
       qPane.appendChild(section);
     });
     renderNavBubbles(part.questions || [], partIdx);
@@ -389,13 +382,21 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (nextBtn) nextBtn.addEventListener("click", () => moveToPart(runner.partIndex + 1));
   }
 
-  function renderQuestionBlock(question, questionNumber) {
+  function renderQuestionBlock(question, questionNumber, endNumber) {
+    if (question.type === "label") {
+      const block = document.createElement("div");
+      block.className = "exam-label-block exam-rich-content";
+      block.innerHTML = question.text || "";
+      return block;
+    }
+
     const answers = currentAnswers();
     const block = document.createElement("div");
     block.className = "question-block";
     block.id = "qblock-" + question.id;
 
-    let inner = `<div><span class="q-num">${questionNumber}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint">(select ${(question.answer || []).length || 2})</span>` : ""}</div>`;
+    const numberLabel = (endNumber && endNumber !== questionNumber) ? `${questionNumber} and ${endNumber}` : questionNumber;
+    let inner = `<div><span class="q-num">${numberLabel}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint">(select ${(question.answer || []).length || 2})</span>` : ""}</div>`;
 
     if (question.type === "mc" || question.type === "tfng") {
       const selected = answers[question.id];
@@ -459,13 +460,16 @@ document.addEventListener("DOMContentLoaded", async function () {
     const answers = currentAnswers();
 
     questions.forEach((question, index) => {
-      const questionNumber = sectionQuestionNumber(partIndex, index);
+      if (question.type === "label") return; // instructional text — not a scored question, no nav bubble
+      const weight = questionWeight(question);
+      const startNumber = sectionQuestionNumber(partIndex, index);
+      const endNumber = weight > 1 ? startNumber + weight - 1 : startNumber;
       const value = answers[question.id];
       const hasAnswer = Array.isArray(value) ? value.length > 0 : normalizeAnswer(value).length > 0;
       const bubble = document.createElement("div");
-      bubble.className = "nav-bubble" + (hasAnswer ? " answered" : "");
-      bubble.textContent = questionNumber;
-      bubble.title = "Jump to question " + questionNumber;
+      bubble.className = "nav-bubble" + (hasAnswer ? " answered" : "") + (weight > 1 ? " nav-bubble-wide" : "");
+      bubble.textContent = endNumber !== startNumber ? `${startNumber}-${endNumber}` : startNumber;
+      bubble.title = "Jump to question " + (endNumber !== startNumber ? `${startNumber} and ${endNumber}` : startNumber);
       bubble.addEventListener("click", () => document.getElementById("qblock-" + question.id).scrollIntoView({ behavior: "smooth", block: "center" }));
       wrap.appendChild(bubble);
     });
@@ -486,13 +490,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     clearTimer();
 
     if (runner.section === "listening") {
-      session.listeningScore = scoreExamSection(exam.listening || [], session.listeningAnswers || {});
-      session.scoringVersion = 2;
+      session.listeningScore = scoreSection(exam.listening || [], session.listeningAnswers || {});
+      session.scoringVersion = 3;
       saveSession(session);
       startSection("reading");
     } else {
-      session.readingScore = scoreExamSection(exam.reading || [], session.readingAnswers || {});
-      session.scoringVersion = 2;
+      session.readingScore = scoreSection(exam.reading || [], session.readingAnswers || {});
+      session.scoringVersion = 3;
       saveSession(session);
       window.location.href = "student-writing.html";
     }
