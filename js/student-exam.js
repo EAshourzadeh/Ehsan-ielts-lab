@@ -21,7 +21,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     partIndex: 0,
     timerSeconds: 0,
     timerHandle: null,
-    lastPartMediaReady: false
+    lastPartMediaReady: false,
+    visitedReadingParts: new Set()
   };
 
   document.getElementById("runnerCandidateName").textContent = session.studentName;
@@ -38,7 +39,12 @@ document.addEventListener("DOMContentLoaded", async function () {
       return;
     }
 
-    renderRunnerPart(0, false);
+    if (section === "reading") {
+      runner.visitedReadingParts = new Set();
+      renderReadingInstructions();
+    } else {
+      renderRunnerPart(0, false);
+    }
     startTimer("runnerTimer", submitSection);
   }
 
@@ -208,8 +214,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       btn.disabled = !(isLastPart && runner.lastPartMediaReady);
       btn.title = btn.disabled ? "Finish or skip the final listening part before submitting" : "";
     } else {
-      btn.disabled = false;
-      btn.title = "";
+      const allPassagesVisited = runner.parts.length > 0 && runner.visitedReadingParts.size >= runner.parts.length;
+      btn.disabled = !allPassagesVisited;
+      btn.title = allPassagesVisited ? "" : "Visit every reading passage before submitting the section";
     }
   }
 
@@ -217,6 +224,32 @@ document.addEventListener("DOMContentLoaded", async function () {
     syncVisibleAnswers();
     renderRunnerPart(partIdx, false);
   }
+
+  function renderReadingInstructions() {
+    document.getElementById("runnerPartLabel").textContent = `Instructions — ${runner.parts.length} passage${runner.parts.length === 1 ? "" : "s"}`;
+    document.getElementById("runnerPassagePane").innerHTML = `
+      <section style="max-width:720px;margin:32px auto;padding:28px;border:1px solid var(--border, #d9dee8);border-radius:16px;background:var(--surface, #fff);">
+        <div class="section-tag" style="display:inline-block;margin-bottom:12px;">READING</div>
+        <h2 style="margin-top:0;">Before you begin</h2>
+        <p>This section contains <strong>${runner.parts.length} passage${runner.parts.length === 1 ? "" : "s"}</strong>. Your answers are saved automatically as you work.</p>
+        <ul style="line-height:1.75;padding-left:22px;">
+          <li>Use the sticky <strong>Previous Passage</strong> and <strong>Next Passage</strong> controls to move between passages.</li>
+          <li>Visit every passage before submitting the section.</li>
+          <li>Check the numbered question bubbles for unanswered questions.</li>
+          <li>After submitting, you cannot return to the Reading section.</li>
+        </ul>
+        <button type="button" class="btn btn-primary btn-lg" id="btnStartReading">Start Reading</button>
+      </section>`;
+    document.getElementById("runnerQuestionsPane").innerHTML = `
+      <div class="grading-detail-empty" style="padding:36px;text-align:center;">
+        <h3>Reading instructions</h3>
+        <p class="muted">Select <strong>Start Reading</strong> to open Passage 1.</p>
+      </div>`;
+    document.getElementById("navBubbles").innerHTML = "";
+    updateSubmitGate();
+    document.getElementById("btnStartReading").addEventListener("click", () => renderRunnerPart(0, false));
+  }
+
 
   function renderRunnerPart(partIdx, syncCurrent = true) {
     if (syncCurrent) syncVisibleAnswers();
@@ -226,6 +259,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     runner.partIndex = partIdx;
     runner.lastPartMediaReady = false;
+    if (runner.section === "reading") runner.visitedReadingParts.add(partIdx);
     const isLastPart = partIdx === runner.parts.length - 1;
 
     document.getElementById("runnerPartLabel").textContent =
@@ -236,7 +270,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       passagePane.innerHTML = `
         <div class="audio-player-block">
           <h3>${part.title}</h3>
-          <p class="muted small">Audio plays once and cannot be paused, rewound, or downloaded. Having a technical problem? Use Skip to move on.</p>
+          <p class="muted small">Audio plays once and cannot be paused, rewound, or downloaded. If you want to move on before the audio finishes, make sure you have entered your answers, then use <strong>Skip This Part</strong>.</p>
           <div class="custom-audio-player">
             <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
             <button class="btn btn-ghost btn-sm" id="audioSkipBtn">Skip This Part</button>
@@ -251,19 +285,24 @@ document.addEventListener("DOMContentLoaded", async function () {
         </div>`;
       wireAudioPlayer(part);
     } else {
+      const navigationButtons = `
+        ${partIdx > 0 ? `<button type="button" class="btn btn-ghost btn-sm" data-reading-prev>&larr; Previous Passage</button>` : `<span></span>`}
+        <strong style="align-self:center;">Passage ${partIdx + 1} of ${runner.parts.length}</strong>
+        ${!isLastPart ? `<button type="button" class="btn btn-primary btn-sm" data-reading-next>Next Passage &rarr;</button>` : `<span class="muted small" style="align-self:center;">Final passage</span>`}`;
+
       passagePane.innerHTML = `
+        <div class="passage-nav" style="position:sticky;top:0;z-index:3;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:-1px -1px 20px;padding:12px;background:rgba(255,255,255,.96);border:1px solid var(--border, #d9dee8);border-radius:10px;box-shadow:0 5px 16px rgba(20,35,65,.08);">
+          ${navigationButtons}
+        </div>
         ${hasRichContent(part.intro) ? `<div class="reading-passage-intro exam-rich-content">${part.intro}</div>` : ""}
         <h3>${part.title}</h3>
         <div class="reading-passage-body exam-rich-content">${part.passage || ""}</div>
-        <div class="passage-nav" style="margin-top:20px;display:flex;gap:10px;">
-          ${partIdx > 0 ? `<button class="btn btn-ghost btn-sm" id="btnPrevPassage">&larr; Previous Passage</button>` : ""}
-          ${!isLastPart ? `<button class="btn btn-primary btn-sm" id="btnNextPassage">Next Passage &rarr;</button>` : ""}
+        <div class="passage-nav" style="margin-top:24px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding-top:16px;border-top:1px solid var(--border, #d9dee8);">
+          ${navigationButtons}
         </div>`;
 
-      const prevBtn = document.getElementById("btnPrevPassage");
-      const nextBtn = document.getElementById("btnNextPassage");
-      if (prevBtn) prevBtn.addEventListener("click", () => moveToPart(partIdx - 1));
-      if (nextBtn) nextBtn.addEventListener("click", () => moveToPart(partIdx + 1));
+      passagePane.querySelectorAll("[data-reading-prev]").forEach(button => button.addEventListener("click", () => moveToPart(partIdx - 1)));
+      passagePane.querySelectorAll("[data-reading-next]").forEach(button => button.addEventListener("click", () => moveToPart(partIdx + 1)));
     }
 
     const qPane = document.getElementById("runnerQuestionsPane");
@@ -326,7 +365,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       playBtn.style.display = "none";
       skipBtn.style.display = "none";
       statusEl.style.display = "block";
-      statusEl.textContent = "⏭ Part skipped";
+      statusEl.textContent = "⏭ Your answers (if any) have been saved, and this part was skipped.";
       onMediaReady();
     });
 

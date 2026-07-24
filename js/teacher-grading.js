@@ -11,6 +11,8 @@ document.addEventListener("DOMContentLoaded", function () {
     let searchTerm = "";
     let statusFilter = "all";
     let hasUnsavedChanges = false;
+    let renderedDetailId = null;
+    const reviewOpenState = {};
 
     const wrap = document.getElementById("gradingList");
     wrap.innerHTML = `
@@ -274,10 +276,28 @@ document.addEventListener("DOMContentLoaded", function () {
         </div>`;
     }
 
+
+    function captureReviewOpenState() {
+      if (!renderedDetailId) return;
+      const detail = document.getElementById("gradingDetail");
+      const sections = detail ? detail.querySelectorAll("[data-review-section]") : [];
+      if (!sections.length) return;
+      reviewOpenState[renderedDetailId] = reviewOpenState[renderedDetailId] || {};
+      sections.forEach(section => {
+        reviewOpenState[renderedDetailId][section.dataset.reviewSection] = section.open;
+      });
+    }
+
+    function reviewOpenAttribute(id, section) {
+      return reviewOpenState[id] && reviewOpenState[id][section] ? " open" : "";
+    }
+
     function renderDetail() {
+      captureReviewOpenState();
       const detail = document.getElementById("gradingDetail");
       if (!selectedId || !liveResults[selectedId]) {
         detail.innerHTML = `<div class="grading-detail-empty"><h3>Select a submission</h3><p class="muted">Choose a student from the list to review answers and assign grades.</p></div>`;
+        renderedDetailId = null;
         return;
       }
 
@@ -314,22 +334,22 @@ document.addEventListener("DOMContentLoaded", function () {
           <div class="grading-score-card overall"><span>Overall</span><strong>${overall || "—"}</strong><small>${overall ? "Final band" : "Pending"}</small></div>
         </div>
 
-        <details class="grading-section" open>
-          <summary><span>Objective answers</span><small>Student response, answer key, and status</small></summary>
-          <div class="grading-section-body answer-review-sections">
-            <details class="answer-review-section" open>
-              <summary>Listening answers</summary>
-              ${renderAnswerReview("Listening", exam && exam.listening, result.listeningAnswers)}
-            </details>
-            <details class="answer-review-section">
-              <summary>Reading answers</summary>
-              ${renderAnswerReview("Reading", exam && exam.reading, result.readingAnswers)}
-            </details>
+        <details class="grading-section" data-review-section="listening"${reviewOpenAttribute(selectedId, "listening")}>
+          <summary><span>Listening review</span><small>Student answers, answer key, and status</small></summary>
+          <div class="grading-section-body">
+            ${renderAnswerReview("Listening", exam && exam.listening, result.listeningAnswers)}
           </div>
         </details>
 
-        <details class="grading-section" open>
-          <summary><span>Writing responses</span><small>Read and assess both tasks</small></summary>
+        <details class="grading-section" data-review-section="reading"${reviewOpenAttribute(selectedId, "reading")}>
+          <summary><span>Reading review</span><small>Student answers, answer key, and status</small></summary>
+          <div class="grading-section-body">
+            ${renderAnswerReview("Reading", exam && exam.reading, result.readingAnswers)}
+          </div>
+        </details>
+
+        <details class="grading-section" data-review-section="writing"${reviewOpenAttribute(selectedId, "writing")}>
+          <summary><span>Writing review</span><small>Read and assess both tasks</small></summary>
           <div class="grading-section-body writing-review-grid">
             <article class="writing-response-card">
               <header><strong>Task 1</strong><span>${wordCount(result.writingTask1)} words</span></header>
@@ -369,6 +389,7 @@ document.addEventListener("DOMContentLoaded", function () {
           </div>
         </section>`;
 
+      renderedDetailId = selectedId;
       bindDetailEvents();
     }
 
@@ -386,6 +407,15 @@ document.addEventListener("DOMContentLoaded", function () {
       const saveButton = detail.querySelector("[data-save-result]");
       const previewButton = detail.querySelector("[data-preview-result]");
       const recalculateButton = detail.querySelector("[data-recalculate-objective]");
+
+      const detailId = renderedDetailId;
+      detail.querySelectorAll("[data-review-section]").forEach(section => {
+        section.addEventListener("toggle", () => {
+          if (!detailId) return;
+          reviewOpenState[detailId] = reviewOpenState[detailId] || {};
+          reviewOpenState[detailId][section.dataset.reviewSection] = section.open;
+        });
+      });
 
       writingSelect.addEventListener("change", event => {
         setLocalEdit(event.target.dataset.gradeBand, "writingBand", event.target.value === "" ? null : Number(event.target.value));
