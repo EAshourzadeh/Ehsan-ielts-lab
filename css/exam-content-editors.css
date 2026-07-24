@@ -21,6 +21,25 @@
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
+.multi-weight-hint {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--color-amber-600, #b97816);
+  font-weight: 700;
+}
+
+.builder-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.label-question-row {
+  background: var(--color-amber-100, #fff3d9);
+  border-radius: var(--radius-sm, 8px);
+  padding: 10px 12px;
+}
+
 .question-groups-wrap {
   display: grid;
   gap: 18px;
@@ -128,6 +147,16 @@
   margin-bottom: 7px;
   font-weight: 800;
   letter-spacing: 0.01em;
+}
+
+.exam-label-block {
+  margin: 4px 0 16px;
+  padding: 2px 0;
+  line-height: 1.68;
+}
+
+.exam-label-block:first-child {
+  margin-top: 0;
 }
 
 .exam-rich-content {

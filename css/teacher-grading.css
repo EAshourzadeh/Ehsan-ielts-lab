@@ -350,6 +350,13 @@
   color: #5b6472;
 }
 
+.answer-count.partial,
+.answer-status.partial {
+  background: #fff3d9;
+  color: #8a5a12;
+  text-transform: none;
+}
+
 .answer-table-wrap {
   overflow: auto;
   margin-bottom: 14px;
