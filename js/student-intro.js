@@ -1,1 +1,8 @@
-document.addEventListener("DOMContentLoaded",async()=>{const s=getSession();if(!s){location.href="student-login.html";return;}const e=await getExam(s.examId);document.getElementById("introTitle").textContent=e?.name||"Exam instructions";document.getElementById("introCandidate").textContent=`Candidate: ${s.studentName}`;document.getElementById("btnBeginExam").onclick=()=>location.href="student-exam.html";});
+document.addEventListener("DOMContentLoaded", function () {
+  const session = getSession();
+  if (!session) { window.location.href = "student-login.html"; return; }
+  document.getElementById("introExamName").textContent = session.examName;
+  document.getElementById("btnStartExam").addEventListener("click", () => {
+    window.location.href = "student-exam.html";
+  });
+});
