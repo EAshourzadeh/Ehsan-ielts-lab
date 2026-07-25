@@ -92,6 +92,11 @@ document.addEventListener("DOMContentLoaded", async function () {
     return 1;
   }
 
+  function currentQuestionById(questionId) {
+    const part = runner.parts[runner.partIndex];
+    return part && (part.questions || []).find(question => question.id === questionId);
+  }
+
   function sectionQuestionNumber(partIndex, questionIndex) {
     let count = 0;
     for (let index = 0; index < partIndex; index += 1) {
@@ -396,7 +401,14 @@ document.addEventListener("DOMContentLoaded", async function () {
     block.id = "qblock-" + question.id;
 
     const numberLabel = (endNumber && endNumber !== questionNumber) ? `${questionNumber} and ${endNumber}` : questionNumber;
-    let inner = `<div><span class="q-num">${numberLabel}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint">(select ${(question.answer || []).length || 2})</span>` : ""}</div>`;
+    const multiLimit = question.type === "multi" ? questionWeight(question) : 0;
+    const savedMultiAnswers = question.type === "multi" && Array.isArray(answers[question.id])
+      ? answers[question.id].filter(value => (question.options || []).includes(value)).slice(0, multiLimit)
+      : [];
+    if (question.type === "multi" && JSON.stringify(savedMultiAnswers) !== JSON.stringify(answers[question.id] || [])) {
+      answers[question.id] = savedMultiAnswers;
+    }
+    let inner = `<div><span class="q-num">${numberLabel}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint" data-multi-hint="${escapeAttribute(question.id)}">(select exactly ${multiLimit}; ${savedMultiAnswers.length} selected)</span>` : ""}</div>`;
 
     if (question.type === "mc" || question.type === "tfng") {
       const selected = answers[question.id];
@@ -407,11 +419,11 @@ document.addEventListener("DOMContentLoaded", async function () {
       });
       inner += `</div>`;
     } else if (question.type === "multi") {
-      const selectedAnswers = Array.isArray(answers[question.id]) ? answers[question.id] : [];
+      const selectedAnswers = savedMultiAnswers;
       inner += `<div class="q-options">`;
       (question.options || []).forEach(option => {
         const isSelected = selectedAnswers.includes(option) ? "selected" : "";
-        inner += `<div class="q-option multi-opt ${isSelected}" data-qid="${escapeAttribute(question.id)}" data-val="${escapeAttribute(option)}" data-multi="1"><span class="box"></span>${option}</div>`;
+        inner += `<div class="q-option multi-opt ${isSelected}" data-qid="${escapeAttribute(question.id)}" data-val="${escapeAttribute(option)}" data-multi="1" data-multi-limit="${multiLimit}"><span class="box"></span>${option}</div>`;
       });
       inner += `</div>`;
     } else if (question.type === "fill") {
@@ -429,12 +441,34 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     const answers = currentAnswers();
     if (option.dataset.multi) {
+      const question = currentQuestionById(option.dataset.qid);
+      const limit = question ? questionWeight(question) : Number(option.dataset.multiLimit || 2);
       const selected = Array.isArray(answers[option.dataset.qid]) ? [...answers[option.dataset.qid]] : [];
       const index = selected.indexOf(option.dataset.val);
-      if (index >= 0) selected.splice(index, 1);
-      else selected.push(option.dataset.val);
+      const hint = document.querySelector(`[data-multi-hint="${option.dataset.qid}"]`);
+
+      if (index >= 0) {
+        selected.splice(index, 1);
+      } else if (selected.length >= limit) {
+        if (hint) {
+          hint.textContent = `(select exactly ${limit}; remove one before choosing another)`;
+          hint.classList.add("limit-reached");
+          setTimeout(() => {
+            hint.textContent = `(select exactly ${limit}; ${selected.length} selected)`;
+            hint.classList.remove("limit-reached");
+          }, 1600);
+        }
+        return;
+      } else {
+        selected.push(option.dataset.val);
+      }
+
       answers[option.dataset.qid] = selected;
       option.classList.toggle("selected", selected.includes(option.dataset.val));
+      if (hint) {
+        hint.textContent = `(select exactly ${limit}; ${selected.length} selected)`;
+        hint.classList.toggle("selection-complete", selected.length === limit);
+      }
     } else {
       answers[option.dataset.qid] = option.dataset.val;
       document.querySelectorAll(".q-option").forEach(element => {

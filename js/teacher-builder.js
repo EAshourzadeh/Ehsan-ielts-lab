@@ -134,9 +134,223 @@ document.addEventListener("DOMContentLoaded", function () {
       return question.id;
     }
 
+    const TFNG_OPTIONS = ["True", "False", "Not Given"];
+
+    function optionLetter(index) {
+      return String.fromCharCode(65 + index);
+    }
+
+    function normalizeComparable(value) {
+      return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    }
+
+    function parseLegacyOptions(value) {
+      if (Array.isArray(value)) return value.map(option => String(option ?? ""));
+      if (typeof value !== "string") return [];
+      return value.split(/\r?\n|,/).map(option => option.trim()).filter(Boolean);
+    }
+
+    function canonicalTfngAnswer(value) {
+      const normalized = normalizeComparable(value).replace(/[\/\-]/g, " ");
+      if (["true", "t"].includes(normalized)) return "True";
+      if (["false", "f"].includes(normalized)) return "False";
+      if (["not given", "notgiven", "ng", "n g"].includes(normalized)) return "Not Given";
+      return "";
+    }
+
+    function resolveChoiceReference(options, value) {
+      const normalized = normalizeComparable(value);
+      if (!normalized) return "";
+      const exact = options.find(option => normalizeComparable(option) === normalized);
+      if (exact !== undefined) return exact;
+      if (/^[a-z]$/i.test(String(value).trim())) {
+        const index = String(value).trim().toUpperCase().charCodeAt(0) - 65;
+        if (index >= 0 && index < options.length) return options[index];
+      }
+      return String(value).trim();
+    }
+
+    function normalizeQuestionAnswerModel(question) {
+      if (!question || question.type === "label") return;
+
+      if (question.type === "tfng") {
+        question.options = [...TFNG_OPTIONS];
+        question.answer = canonicalTfngAnswer(question.answer);
+        return;
+      }
+
+      if (question.type === "mc" || question.type === "multi") {
+        const defaultOptionCount = question.type === "multi" ? 4 : 3;
+        const options = parseLegacyOptions(question.options);
+        if (!options.length) {
+          while (options.length < defaultOptionCount) options.push("");
+        }
+        question.options = options;
+
+        const rawAnswers = Array.isArray(question.answer)
+          ? question.answer
+          : question.type === "multi"
+            ? String(question.answer || "").split(/[,|]/)
+            : [question.answer];
+        const mapped = rawAnswers
+          .map(value => resolveChoiceReference(options, value))
+          .filter(value => normalizeComparable(value));
+        const unique = mapped.filter((value, index, list) =>
+          list.findIndex(item => normalizeComparable(item) === normalizeComparable(value)) === index
+        );
+        question.answer = question.type === "multi" ? unique : (unique[0] || "");
+        return;
+      }
+
+      delete question.options;
+      if (Array.isArray(question.answer)) {
+        question.answer = question.answer.map(value => String(value ?? "").trim()).filter(Boolean);
+      } else {
+        question.answer = String(question.answer ?? "");
+      }
+    }
+
+    function initializeQuestionType(question, nextType) {
+      const previousOptions = parseLegacyOptions(question.options);
+      question.type = nextType;
+
+      if (nextType === "tfng") {
+        question.options = [...TFNG_OPTIONS];
+        question.answer = "";
+      } else if (nextType === "mc" || nextType === "multi") {
+        const minimumOptions = nextType === "multi" ? 4 : 3;
+        question.options = previousOptions.length ? previousOptions : [];
+        while (question.options.length < minimumOptions) question.options.push("");
+        question.answer = nextType === "multi" ? [] : "";
+      } else {
+        delete question.options;
+        question.answer = "";
+      }
+    }
+
+    function choiceOptionIsCorrect(question, optionIndex) {
+      const option = (question.options || [])[optionIndex] || "";
+      if (!normalizeComparable(option)) return false;
+      if (question.type === "multi") {
+        return (Array.isArray(question.answer) ? question.answer : [])
+          .some(answer => normalizeComparable(answer) === normalizeComparable(option));
+      }
+      return normalizeComparable(question.answer) === normalizeComparable(option);
+    }
+
+    function setChoiceOptionText(question, optionIndex, nextValue) {
+      const previousValue = question.options[optionIndex] || "";
+      question.options[optionIndex] = nextValue;
+
+      if (question.type === "multi") {
+        const answers = Array.isArray(question.answer) ? question.answer : [];
+        question.answer = answers
+          .map(answer => normalizeComparable(answer) === normalizeComparable(previousValue) ? nextValue : answer)
+          .filter(answer => normalizeComparable(answer));
+      } else if (normalizeComparable(previousValue) && normalizeComparable(question.answer) === normalizeComparable(previousValue)) {
+        question.answer = normalizeComparable(nextValue) ? nextValue : "";
+      }
+    }
+
+    function questionAnswerErrors(question) {
+      if (!question || question.type === "label" || question.type === "fill") return [];
+      if (question.type === "tfng") {
+        return TFNG_OPTIONS.includes(question.answer) ? [] : ["Select True, False, or Not Given as the correct answer."];
+      }
+
+      const options = Array.isArray(question.options) ? question.options : [];
+      const nonEmpty = options.filter(option => normalizeComparable(option));
+      const errors = [];
+      const minimum = question.type === "multi" ? 3 : 2;
+      if (nonEmpty.length < minimum) errors.push(`Add at least ${minimum} non-empty options.`);
+      if (options.some(option => !normalizeComparable(option))) errors.push("Complete or remove every blank option.");
+      const normalizedOptions = nonEmpty.map(normalizeComparable);
+      if (new Set(normalizedOptions).size !== normalizedOptions.length) errors.push("Option text must be unique.");
+
+      if (question.type === "mc") {
+        const answer = normalizeComparable(question.answer);
+        if (!answer) errors.push("Select one correct option.");
+        else if (!normalizedOptions.includes(answer)) errors.push("The selected answer no longer matches an option.");
+      } else {
+        const answers = Array.isArray(question.answer) ? question.answer : [];
+        const normalizedAnswers = answers.map(normalizeComparable).filter(Boolean);
+        if (normalizedAnswers.length < 2) errors.push("Select at least two correct options.");
+        if (normalizedAnswers.some(answer => !normalizedOptions.includes(answer))) {
+          errors.push("Every correct answer must match an option.");
+        }
+        if (nonEmpty.length > 0 && normalizedAnswers.length >= nonEmpty.length) {
+          errors.push("Leave at least one distractor option unselected.");
+        }
+      }
+      return [...new Set(errors)];
+    }
+
+    function answerStatusMarkup(question, questionIndex) {
+      const errors = questionAnswerErrors(question);
+      if (!errors.length) {
+        return `<div class="answer-key-feedback is-complete" data-answer-validation="${questionIndex}">
+          <span class="answer-key-status">✓ Answer key complete</span>
+        </div>`;
+      }
+      return `<div class="answer-key-feedback is-incomplete" data-answer-validation="${questionIndex}">
+        <span class="answer-key-status">Answer key needs attention</span>
+        <ul>${errors.map(error => `<li>${error}</li>`).join("")}</ul>
+      </div>`;
+    }
+
+    function updateAnswerStatus(container, questionIndex, question) {
+      const current = container.querySelector(`[data-answer-validation="${questionIndex}"]`);
+      if (!current) return;
+      const scratch = document.createElement("div");
+      scratch.innerHTML = answerStatusMarkup(question, questionIndex);
+      current.replaceWith(scratch.firstElementChild);
+      const row = container.querySelector(`[data-question-index="${questionIndex}"]`);
+      if (row) row.classList.toggle("has-answer-errors", questionAnswerErrors(question).length > 0);
+    }
+
+    function collectAnswerKeyErrors() {
+      const errors = [];
+      [
+        { key: "listening", label: "Listening" },
+        { key: "reading", label: "Reading" }
+      ].forEach(section => {
+        (workingExam[section.key] || []).forEach((part, partIndex) => {
+          (part.questions || []).forEach((question, questionIndex) => {
+            questionAnswerErrors(question).forEach(message => {
+              errors.push({
+                section: section.key,
+                sectionLabel: section.label,
+                partIndex,
+                questionIndex,
+                questionId: question.id,
+                partTitle: part.title || `${section.label} ${partIndex + 1}`,
+                message
+              });
+            });
+          });
+        });
+      });
+      return errors;
+    }
+
+    function focusAnswerKeyError(error) {
+      const tabId = error.section === "listening" ? "btabListening" : "btabReading";
+      const tab = document.querySelector(`[data-btab="${tabId}"]`);
+      if (tab) tab.click();
+      const row = Array.from(document.querySelectorAll("[data-question-id]"))
+        .find(element => element.dataset.questionId === error.questionId);
+      if (!row) return;
+      row.classList.add("answer-error-focus");
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => row.classList.remove("answer-error-focus"), 1800);
+    }
+
     function normalizeQuestionGroups(part, prefix) {
       part.questions = Array.isArray(part.questions) ? part.questions : [];
-      part.questions.forEach(question => ensureQuestionId(question, `${prefix}q`));
+      part.questions.forEach(question => {
+        ensureQuestionId(question, `${prefix}q`);
+        normalizeQuestionAnswerModel(question);
+      });
 
       const questionById = new Map(part.questions.map(question => [question.id, question]));
       const usedIds = new Set();
@@ -383,6 +597,16 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     });
 
+    function updateVisibleQuestionRanges(section) {
+      const parts = section === "listening" ? workingExam.listening : workingExam.reading;
+      document.querySelectorAll(`[data-range-section="${section}"]`).forEach(chip => {
+        const partIndex = Number(chip.dataset.rangePart);
+        const part = parts[partIndex];
+        const group = part && (part.questionGroups || []).find(item => item.id === chip.dataset.rangeGroup);
+        if (part && group) chip.textContent = questionRangeText(parts, partIndex, group);
+      });
+    }
+
     function renderQuestionGroup(options) {
       const {
         card,
@@ -401,7 +625,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="question-group-editor-head">
           <div>
             <strong>Question Group ${groupIndex + 1}</strong>
-            <span class="question-range-chip">${rangeText}</span>
+            <span class="question-range-chip" data-range-section="${section}" data-range-part="${partIndex}" data-range-group="${group.id}">${rangeText}</span>
           </div>
           <button class="btn btn-danger btn-sm" type="button" data-remove-group="${group.id}">Remove Group</button>
         </div>
@@ -433,6 +657,7 @@ document.addEventListener("DOMContentLoaded", function () {
       renderQuestionEditors(questionContainer, questionsForGroup(part, group), {
         section,
         partIndex,
+        onWeightChange: () => updateVisibleQuestionRanges(section),
         onDelete: question => {
           removeQuestion(part, group, question.id);
           markDirty();
@@ -662,9 +887,13 @@ document.addEventListener("DOMContentLoaded", function () {
     function renderQuestionEditors(container, questions, config = {}) {
       container.innerHTML = "";
       questions.forEach((question, questionIndex) => {
+        normalizeQuestionAnswerModel(question);
+
         if (question.type === "label") {
           const row = document.createElement("div");
           row.className = "builder-question-row enhanced-question-row label-question-row";
+          row.dataset.questionId = question.id;
+          row.dataset.questionIndex = questionIndex;
           row.innerHTML = `
             <div style="flex:1;">
               <label class="builder-field-label" style="margin-top:0;">Label / text block (not a question — not scored)</label>
@@ -681,32 +910,86 @@ document.addEventListener("DOMContentLoaded", function () {
 
         const isMultipleChoice = question.type === "mc";
         const isMultipleAnswer = question.type === "multi";
-        const optionsValue = Array.isArray(question.options) ? question.options.join(", ") : "";
-        const answerValue = Array.isArray(question.answer)
-          ? question.answer.join(isMultipleAnswer ? ", " : " | ")
-          : (question.answer || "");
-        const multiWeight = isMultipleAnswer ? (Array.isArray(question.answer) && question.answer.length ? question.answer.length : 2) : 0;
+        const isTfng = question.type === "tfng";
+        const multiWeight = isMultipleAnswer ? questionWeight(question) : 0;
+        let answerEditor = "";
+
+        if (isMultipleChoice || isMultipleAnswer) {
+          const selectionType = isMultipleAnswer ? "checkbox" : "radio";
+          const instruction = isMultipleAnswer
+            ? "Tick every correct option. Each selected correct option becomes one numbered IELTS answer."
+            : "Choose exactly one correct option.";
+          const optionRows = (question.options || []).map((option, optionIndex) => {
+            const optionReady = normalizeComparable(option);
+            return `
+              <div class="choice-option-editor-row">
+                <label class="correct-option-toggle" title="Mark option ${optionLetter(optionIndex)} as correct">
+                  <input type="${selectionType}" name="correct-${question.id}" data-q-correct="${questionIndex}" data-option-index="${optionIndex}" ${choiceOptionIsCorrect(question, optionIndex) ? "checked" : ""} ${optionReady ? "" : "disabled"}>
+                  <span class="choice-option-letter">${optionLetter(optionIndex)}</span>
+                </label>
+                <input type="text" class="text-input choice-option-input" placeholder="Option ${optionLetter(optionIndex)}" value="${escapeAttribute(option)}" data-q-option="${questionIndex}" data-option-index="${optionIndex}" data-previous-weight="${questionWeight(question)}">
+                <button class="btn btn-ghost btn-sm choice-option-remove" type="button" data-q-option-remove="${questionIndex}" data-option-index="${optionIndex}" aria-label="Remove option ${optionLetter(optionIndex)}">Remove</button>
+              </div>`;
+          }).join("");
+          answerEditor = `
+            <div class="answer-key-panel">
+              <div class="answer-key-panel-head">
+                <div>
+                  <strong>Options and correct answer${isMultipleAnswer ? "s" : ""}</strong>
+                  <p>${instruction}</p>
+                </div>
+                ${isMultipleAnswer ? `<span class="multi-weight-pill" data-multi-weight="${questionIndex}">${multiWeight} answer slots</span>` : ""}
+              </div>
+              <div class="choice-option-editor-list">${optionRows}</div>
+              <button class="btn btn-ghost btn-sm" type="button" data-q-option-add="${questionIndex}">+ Add option</button>
+            </div>`;
+        } else if (isTfng) {
+          answerEditor = `
+            <div class="answer-key-panel tfng-answer-panel">
+              <div class="answer-key-panel-head">
+                <div>
+                  <strong>Correct answer</strong>
+                  <p>The student options are fixed and displayed in this order.</p>
+                </div>
+              </div>
+              <div class="tfng-answer-grid">
+                ${TFNG_OPTIONS.map(option => `
+                  <label class="tfng-answer-choice ${question.answer === option ? "is-selected" : ""}">
+                    <input type="radio" name="tfng-${question.id}" value="${option}" data-q-tfng="${questionIndex}" ${question.answer === option ? "checked" : ""}>
+                    <span>${option}</span>
+                  </label>`).join("")}
+              </div>
+            </div>`;
+        } else {
+          const answerValue = Array.isArray(question.answer) ? question.answer.join(" | ") : (question.answer || "");
+          answerEditor = `
+            <div class="answer-key-panel fill-answer-panel">
+              <label class="builder-field-label" style="margin-top:0;">Accepted answer${Array.isArray(question.answer) && question.answer.length > 1 ? "s" : ""}</label>
+              <input type="text" class="text-input" placeholder="Correct answer; use | between accepted alternatives" value="${escapeAttribute(answerValue)}" data-q-ans="${questionIndex}">
+              <p class="muted small answer-help">Example: <code>10 | ten</code> accepts either spelling. Matching ignores capitalization and surrounding spaces.</p>
+            </div>`;
+        }
+
+        const errors = questionAnswerErrors(question);
         const row = document.createElement("div");
-        row.className = "builder-question-row enhanced-question-row";
+        row.className = `builder-question-row enhanced-question-row question-authoring-card${errors.length ? " has-answer-errors" : ""}`;
+        row.dataset.questionId = question.id;
+        row.dataset.questionIndex = questionIndex;
         row.innerHTML = `
-          <div>
-            <select data-q-type="${questionIndex}" style="margin-bottom:6px;">
-              <option value="fill" ${question.type === "fill" ? "selected" : ""}>Fill in the blank</option>
-              <option value="mc" ${isMultipleChoice ? "selected" : ""}>Multiple choice (one answer)</option>
-              <option value="multi" ${isMultipleAnswer ? "selected" : ""}>Multiple answer (select several)</option>
-              <option value="tfng" ${question.type === "tfng" ? "selected" : ""}>True / False / Not Given</option>
-            </select>
-            ${isMultipleAnswer ? `<span class="muted small multi-weight-hint">Counts as ${multiWeight} questions in the numbering</span>` : ""}
+          <div class="question-authoring-main">
+            <div class="question-authoring-toolbar">
+              <select data-q-type="${questionIndex}" aria-label="Question type">
+                <option value="fill" ${question.type === "fill" ? "selected" : ""}>Fill in the blank</option>
+                <option value="mc" ${isMultipleChoice ? "selected" : ""}>Multiple choice — one answer</option>
+                <option value="multi" ${isMultipleAnswer ? "selected" : ""}>Multiple choice — several answers</option>
+                <option value="tfng" ${isTfng ? "selected" : ""}>True / False / Not Given</option>
+              </select>
+              ${isMultipleAnswer ? `<span class="muted small multi-weight-hint">Numbering uses ${multiWeight} answer slots</span>` : ""}
+            </div>
+            <label class="builder-field-label">Question text</label>
             <input type="text" class="text-input" placeholder="Question text" value="${escapeAttribute(question.text)}" data-q-text="${questionIndex}">
-            ${(isMultipleChoice || isMultipleAnswer)
-              ? `<input type="text" class="text-input" placeholder="Options, comma-separated" value="${escapeAttribute(optionsValue)}" data-q-opts="${questionIndex}">`
-              : ""}
-            <input type="text" class="text-input" placeholder="${isMultipleAnswer
-              ? "Correct answers, comma-separated"
-              : question.type === "fill"
-                ? "Correct answer; use | between accepted alternatives"
-                : "Correct answer"}" value="${escapeAttribute(answerValue)}" data-q-ans="${questionIndex}">
-            ${question.type === "fill" ? `<p class="muted small answer-help">Example: <code>10 | ten</code> stores both as accepted answers.</p>` : ""}
+            ${answerEditor}
+            ${answerStatusMarkup(question, questionIndex)}
           </div>
           <div class="row-actions">
             <button class="btn btn-ghost btn-sm row-move" type="button" data-q-up="${questionIndex}" ${questionIndex === 0 ? "disabled" : ""} title="Move up">&uarr;</button>
@@ -730,58 +1013,122 @@ document.addEventListener("DOMContentLoaded", function () {
       });
 
       container.querySelectorAll("[data-q-type]").forEach(select => select.addEventListener("change", event => {
-        const question = questions[+event.target.dataset.qType];
-        question.type = event.target.value;
-        if (question.type === "tfng") {
-          question.options = ["True", "False", "Not Given"];
-          question.answer = "";
-        } else if (question.type === "mc") {
-          question.options = Array.isArray(question.options) ? question.options : [];
-          question.answer = "";
-        } else if (question.type === "multi") {
-          question.options = Array.isArray(question.options) ? question.options : [];
-          question.answer = [];
+        const questionIndex = Number(event.target.dataset.qType);
+        const question = questions[questionIndex];
+        const previousWeight = questionWeight(question);
+        initializeQuestionType(question, event.target.value);
+        markDirty();
+        renderQuestionEditors(container, questions, config);
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+      }));
+
+      container.querySelectorAll("[data-q-text]").forEach(input => input.addEventListener("input", event => {
+        questions[Number(event.target.dataset.qText)].text = event.target.value;
+        markDirty();
+      }));
+
+      container.querySelectorAll("[data-q-option]").forEach(input => {
+        input.addEventListener("input", event => {
+          const questionIndex = Number(event.target.dataset.qOption);
+          const optionIndex = Number(event.target.dataset.optionIndex);
+          const question = questions[questionIndex];
+          setChoiceOptionText(question, optionIndex, event.target.value);
+          const toggle = event.target.closest(".choice-option-editor-row").querySelector("[data-q-correct]");
+          if (toggle) {
+            toggle.disabled = !normalizeComparable(event.target.value);
+            toggle.checked = choiceOptionIsCorrect(question, optionIndex);
+          }
+          markDirty();
+          updateAnswerStatus(container, questionIndex, question);
+        });
+        input.addEventListener("change", event => {
+          const question = questions[Number(event.target.dataset.qOption)];
+          const previousWeight = Number(event.target.dataset.previousWeight || 1);
+          if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+          event.target.dataset.previousWeight = questionWeight(question);
+        });
+      });
+
+      container.querySelectorAll("[data-q-correct]").forEach(input => input.addEventListener("change", event => {
+        const questionIndex = Number(event.target.dataset.qCorrect);
+        const optionIndex = Number(event.target.dataset.optionIndex);
+        const question = questions[questionIndex];
+        const option = question.options[optionIndex] || "";
+        if (!normalizeComparable(option)) return;
+        const previousWeight = questionWeight(question);
+
+        if (question.type === "multi") {
+          const answers = Array.isArray(question.answer) ? [...question.answer] : [];
+          const existingIndex = answers.findIndex(answer => normalizeComparable(answer) === normalizeComparable(option));
+          if (event.target.checked && existingIndex === -1) answers.push(option);
+          if (!event.target.checked && existingIndex >= 0) answers.splice(existingIndex, 1);
+          question.answer = answers;
         } else {
-          delete question.options;
-          question.answer = "";
+          question.answer = option;
         }
+
+        markDirty();
+        updateAnswerStatus(container, questionIndex, question);
+        const weightPill = container.querySelector(`[data-multi-weight="${questionIndex}"]`);
+        if (weightPill) weightPill.textContent = `${questionWeight(question)} answer slots`;
+        const toolbarHint = container.querySelector(`[data-question-index="${questionIndex}"] .multi-weight-hint`);
+        if (toolbarHint) toolbarHint.textContent = `Numbering uses ${questionWeight(question)} answer slots`;
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+      }));
+
+      container.querySelectorAll("[data-q-tfng]").forEach(input => input.addEventListener("change", event => {
+        const questionIndex = Number(event.target.dataset.qTfng);
+        const question = questions[questionIndex];
+        question.answer = event.target.value;
+        container.querySelectorAll(`[data-q-tfng="${questionIndex}"]`).forEach(choice => {
+          choice.closest(".tfng-answer-choice").classList.toggle("is-selected", choice.checked);
+        });
+        markDirty();
+        updateAnswerStatus(container, questionIndex, question);
+      }));
+
+      container.querySelectorAll("[data-q-option-add]").forEach(button => button.addEventListener("click", event => {
+        const questionIndex = Number(event.target.dataset.qOptionAdd);
+        questions[questionIndex].options.push("");
         markDirty();
         renderQuestionEditors(container, questions, config);
       }));
 
-      container.querySelectorAll("[data-q-text]").forEach(input => input.addEventListener("input", event => {
-        questions[+event.target.dataset.qText].text = event.target.value;
-        markDirty();
-      }));
-      container.querySelectorAll("[data-q-opts]").forEach(input => input.addEventListener("input", event => {
-        questions[+event.target.dataset.qOpts].options = event.target.value
-          .split(",")
-          .map(value => value.trim())
-          .filter(Boolean);
-        markDirty();
-      }));
-      container.querySelectorAll("[data-q-ans]").forEach(input => input.addEventListener("input", event => {
-        const question = questions[+event.target.dataset.qAns];
+      container.querySelectorAll("[data-q-option-remove]").forEach(button => button.addEventListener("click", event => {
+        const questionIndex = Number(event.target.dataset.qOptionRemove);
+        const optionIndex = Number(event.target.dataset.optionIndex);
+        const question = questions[questionIndex];
+        const previousWeight = questionWeight(question);
+        const removed = question.options[optionIndex] || "";
+        question.options.splice(optionIndex, 1);
         if (question.type === "multi") {
-          question.answer = event.target.value.split(",").map(value => value.trim()).filter(Boolean);
-        } else if (question.type === "fill") {
-          const alternatives = event.target.value.split("|").map(value => value.trim()).filter(Boolean);
-          question.answer = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
-        } else {
-          question.answer = event.target.value;
+          question.answer = (Array.isArray(question.answer) ? question.answer : [])
+            .filter(answer => normalizeComparable(answer) !== normalizeComparable(removed));
+        } else if (normalizeComparable(question.answer) === normalizeComparable(removed)) {
+          question.answer = "";
         }
         markDirty();
+        renderQuestionEditors(container, questions, config);
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
       }));
+
+      container.querySelectorAll("[data-q-ans]").forEach(input => input.addEventListener("input", event => {
+        const question = questions[Number(event.target.dataset.qAns)];
+        const alternatives = event.target.value.split("|").map(value => value.trim()).filter(Boolean);
+        question.answer = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
+        markDirty();
+      }));
+
       container.querySelectorAll("[data-q-up]").forEach(button => button.addEventListener("click", event => {
-        const question = questions[+event.target.dataset.qUp];
+        const question = questions[Number(event.target.dataset.qUp)];
         if (config.onMoveUp) config.onMoveUp(question);
       }));
       container.querySelectorAll("[data-q-down]").forEach(button => button.addEventListener("click", event => {
-        const question = questions[+event.target.dataset.qDown];
+        const question = questions[Number(event.target.dataset.qDown)];
         if (config.onMoveDown) config.onMoveDown(question);
       }));
       container.querySelectorAll("[data-q-del]").forEach(button => button.addEventListener("click", event => {
-        const question = questions[+event.target.dataset.qDel];
+        const question = questions[Number(event.target.dataset.qDel)];
         if (config.onDelete) config.onDelete(question);
       }));
     }
@@ -796,7 +1143,20 @@ document.addEventListener("DOMContentLoaded", function () {
         task1Image: document.getElementById("writingTask1Image").value,
         task2Prompt: cleanRichHtml(task2Quill.root.innerHTML)
       };
-      workingExam.builderSchemaVersion = 2;
+      workingExam.builderSchemaVersion = 3;
+
+      const answerKeyErrors = collectAnswerKeyErrors();
+      if (answerKeyErrors.length) {
+        const firstItems = answerKeyErrors.slice(0, 8).map(error =>
+          `• ${error.sectionLabel} — ${error.partTitle}: ${error.message}`
+        );
+        const remaining = answerKeyErrors.length > firstItems.length
+          ? `\n…and ${answerKeyErrors.length - firstItems.length} more issue${answerKeyErrors.length - firstItems.length === 1 ? "" : "s"}.`
+          : "";
+        alert(`Please complete the answer keys before saving:\n\n${firstItems.join("\n")}${remaining}`);
+        focusAnswerKeyError(answerKeyErrors[0]);
+        return;
+      }
 
       const button = document.getElementById("btnSubmitExam");
       button.disabled = true;
