@@ -1,1 +1,37 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Writing — EHSAN IELTS Lab</title><link rel="stylesheet" href="css/style.css"></head><body><header class="exam-header"><div><span class="section-tag">WRITING</span></div><div class="exam-timer" id="writingTimer">60:00</div><div class="exam-header-right"><span id="writingCandidate"></span><button class="btn btn-sm btn-danger" id="btnSubmitWriting">Submit exam</button></div></header><main class="admin-main" style="max-width:1100px;margin:auto"><div class="builder-tabs"><button class="builder-tab active" data-task="task1">Task 1</button><button class="builder-tab" data-task="task2">Task 2</button></div><section id="task1" class="builder-pane active"><div class="card stack" style="padding:1.2rem"><div id="task1Prompt"></div><img id="task1Image" class="hidden" alt="Task 1 visual"><textarea class="text-input writing-area" id="task1Answer" placeholder="Write at least 150 words."></textarea><div class="muted small" id="task1Count">0 words</div></div></section><section id="task2" class="builder-pane"><div class="card stack" style="padding:1.2rem"><div id="task2Prompt"></div><textarea class="text-input writing-area" id="task2Answer" placeholder="Write at least 250 words."></textarea><div class="muted small" id="task2Count">0 words</div></div></section></main><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script><script src="js/firebase-init.js"></script><script src="js/common.js"></script><script src="js/student-writing.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Writing — EHSAN IELTS Mock Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="exam-header">
+  <div class="exam-header-left">
+    <span class="section-tag">WRITING</span>
+    <span id="writingTaskLabel" class="part-label">Task 1</span>
+  </div>
+  <div class="exam-timer" id="writingTimer">20:00</div>
+  <div class="exam-header-right">
+    <span id="writingCandidateName">—</span>
+    <button class="btn btn-sm btn-danger" id="btnSubmitWritingTask">Submit &amp; Continue</button>
+  </div>
+</header>
+<div class="exam-body">
+  <div class="exam-passage" id="writingPromptPane"></div>
+  <div class="exam-questions writing-answer-pane">
+    <textarea id="writingAnswerArea" class="writing-textarea" placeholder="Write your answer here..."></textarea>
+    <div class="word-count"><span id="wordCountNum">0</span> words</div>
+  </div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
+<script src="js/common.js"></script>
+<script src="js/student-writing.js"></script>
+</body>
+</html>
