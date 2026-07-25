@@ -1,178 +1,1188 @@
-document.addEventListener("DOMContentLoaded",()=>requireAdminAuth(initBuilder));
+document.addEventListener("DOMContentLoaded", function () {
+  requireAdminAuth(() => {
+    ensureBuilderStylesheet();
+    document.getElementById("btnLogout").addEventListener("click", logoutAdmin);
 
-function initBuilder(){
-  document.getElementById("btnLogout")?.addEventListener("click",logoutAdmin);
-  const state={exam:null,exams:{},activeSection:"listening",activeQuestion:null,quills:new Map(),dirty:false};
-  const $=s=>document.querySelector(s); const select=$("#builderExamSelect");
+    const params = new URLSearchParams(window.location.search);
+    const requestedId = params.get("exam");
 
-  registerAnswerSlotBlot();
-  wireStaticActions();
-  load();
+    let workingExam = null;
+    let hasUnsavedChanges = false;
+    let listeningGroupQuills = {};
+    let listeningLabelQuills = {};
+    let readingPassageQuills = {};
+    let readingIntroQuills = {};
+    let readingGroupQuills = {};
+    let readingLabelQuills = {};
 
-  async function load(){
-    state.exams=await getExams();
-    const requested=new URLSearchParams(location.search).get("exam");
-    const first=requested&&state.exams[requested]?requested:Object.keys(state.exams)[0];
-    populateExamSelect(first); await chooseExam(first);
-  }
-  function populateExamSelect(selected){
-    select.innerHTML=Object.values(state.exams).map(e=>`<option value="${escapeHtml(e.id)}" ${e.id===selected?"selected":""}>${escapeHtml(e.name)}</option>`).join("");
-  }
-  async function chooseExam(id){ flushEditors(); state.exam=normalizeExam(state.exams[id]||sampleExam()); state.activeQuestion=null; state.quills.clear(); renderAll(); state.dirty=false; }
-  function markDirty(){state.dirty=true;$("#builderSaveMsg").textContent="Unsaved changes";}
-  function sectionParts(){return state.exam[state.activeSection]||[];}
-  function renderAll(){
-    $("#examName").value=state.exam.name||"";
-    document.querySelectorAll(".builder-tab").forEach(b=>b.classList.toggle("active",b.dataset.section===state.activeSection));
-    document.querySelectorAll(".builder-pane").forEach(p=>p.classList.toggle("active",p.id===`pane-${state.activeSection}`));
-    renderSection("listening",$("#listeningPartsList")); renderSection("reading",$("#readingPartsList")); renderWriting(); renderInspector();
-  }
-  function renderSection(section,root){
-    const parts=state.exam[section]||[]; root.innerHTML=parts.map((part,pi)=>partMarkup(section,part,pi)).join("")||`<div class="card" style="padding:1rem"><p class="muted">No ${section} content yet.</p></div>`;
-    parts.forEach((part,pi)=>{
-      const passage=root.querySelector(`[data-passage-editor="${section}-${pi}"]`); if(passage) mountRichQuill(passage,part.passage||"",html=>part.passage=html,"Paste or write the reading passage…");
-      const intro=root.querySelector(`[data-intro-editor="${section}-${pi}"]`); if(intro) mountRichQuill(intro,part.intro||"",html=>part.intro=html,"Reading passage introduction…",true);
-      (part.questionGroups||[]).forEach((group,gi)=>{
-        const label=root.querySelector(`[data-group-label="${section}-${pi}-${gi}"]`); if(label) mountRichQuill(label,group.label||"",html=>group.label=html,"Questions 1–10…",true);
-        group.questionIds.forEach(qid=>{const q=part.questions.find(item=>item.id===qid); const target=root.querySelector(`[data-composer="${qid}"]`); if(q&&target&&state.activeQuestion===qid) mountQuestionQuill(target,q);});
+    const GROUP_LABEL_PLACEHOLDER = [
+      "Questions 1 - 10",
+      "Complete the notes below.",
+      "Write ONE WORD AND / OR A NUMBER for each answer."
+    ].join("\n");
+
+    const READING_INTRO_PLACEHOLDER =
+      "You should spend about 20 minutes on Questions 1-13, which are based on Reading Passage 1 below.";
+
+    const RICH_TOOLBAR = [
+      [{ header: [2, 3, false] }],
+      ["bold", "italic", "underline"],
+      [{ list: "ordered" }, { list: "bullet" }],
+      [{ align: [] }],
+      ["blockquote", "link", "image"],
+      ["clean"]
+    ];
+
+    function ensureBuilderStylesheet() {
+      if (document.querySelector('link[data-exam-content-editors="1"]')) return;
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "css/exam-content-editors.css";
+      link.dataset.examContentEditors = "1";
+      document.head.appendChild(link);
+    }
+
+    function markDirty() {
+      hasUnsavedChanges = true;
+    }
+
+    function escapeAttribute(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function cleanRichHtml(html) {
+      const value = String(html || "").trim();
+      return value === "<p><br></p>" ? "" : value;
+    }
+
+    function createRichEditor(element, html, placeholder, onChange) {
+      const quill = new Quill(element, {
+        theme: "snow",
+        placeholder,
+        modules: {
+          toolbar: {
+            container: RICH_TOOLBAR,
+            handlers: {
+              image: function () {
+                const url = window.prompt(
+                  "Enter a repository asset path or public image URL (for example: assets/images/map.png):"
+                );
+                if (!url) return;
+                const trimmed = url.trim();
+                if (/^data:/i.test(trimmed)) {
+                  alert("Embedded base64 images are not supported. Add the image to the repository and enter its path instead.");
+                  return;
+                }
+                const range = this.quill.getSelection(true);
+                const insertAt = range ? range.index : Math.max(0, this.quill.getLength() - 1);
+                this.quill.insertEmbed(insertAt, "image", trimmed, "user");
+                this.quill.setSelection(insertAt + 1, 0, "silent");
+              }
+            }
+          }
+        }
+      });
+      // Quill applies height: 100% to the target container. In builder cards,
+      // that can make the editor resolve against the card height and overlap
+      // the question controls below it. Pin each editor to an intentional
+      // viewport and let the editable surface scroll internally.
+      const editorHeight = element.classList.contains("passage-rich-editor")
+        ? 360
+        : element.classList.contains("label-block-editor")
+          ? 110
+          : element.classList.contains("compact-rich-editor")
+            ? 120
+            : element.classList.contains("question-label-editor")
+              ? 150
+              : 140;
+      element.style.setProperty("height", `${editorHeight}px`, "important");
+      element.style.setProperty("min-height", `${editorHeight}px`, "important");
+      element.style.setProperty("max-height", `${editorHeight}px`, "important");
+      quill.root.style.setProperty("height", "100%", "important");
+      quill.root.style.setProperty("min-height", "0", "important");
+      quill.root.style.setProperty("overflow-y", "auto", "important");
+
+      quill.root.innerHTML = html || "";
+      quill.on("text-change", () => {
+        markDirty();
+        if (onChange) onChange(quill);
+      });
+      return quill;
+    }
+
+    const task1Quill = createRichEditor(
+      document.getElementById("writingTask1Prompt"),
+      "",
+      "Enter the Task 1 prompt. You may add a repository-hosted chart or diagram with the image button."
+    );
+    const task2Quill = createRichEditor(
+      document.getElementById("writingTask2Prompt"),
+      "",
+      "Enter the Task 2 essay prompt."
+    );
+
+    function makeId(prefix) {
+      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function ensureQuestionId(question, prefix) {
+      if (!question.id) question.id = makeId(prefix);
+      return question.id;
+    }
+
+    const TFNG_OPTIONS = ["True", "False", "Not Given"];
+
+    function optionLetter(index) {
+      return String.fromCharCode(65 + index);
+    }
+
+    function normalizeComparable(value) {
+      return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+    }
+
+    function parseLegacyOptions(value) {
+      if (Array.isArray(value)) return value.map(option => String(option ?? ""));
+      if (typeof value !== "string") return [];
+      return value.split(/\r?\n|,/).map(option => option.trim()).filter(Boolean);
+    }
+
+    function canonicalTfngAnswer(value) {
+      const normalized = normalizeComparable(value).replace(/[\/\-]/g, " ");
+      if (["true", "t"].includes(normalized)) return "True";
+      if (["false", "f"].includes(normalized)) return "False";
+      if (["not given", "notgiven", "ng", "n g"].includes(normalized)) return "Not Given";
+      return "";
+    }
+
+    function resolveChoiceReference(options, value) {
+      const normalized = normalizeComparable(value);
+      if (!normalized) return "";
+      const exact = options.find(option => normalizeComparable(option) === normalized);
+      if (exact !== undefined) return exact;
+      if (/^[a-z]$/i.test(String(value).trim())) {
+        const index = String(value).trim().toUpperCase().charCodeAt(0) - 65;
+        if (index >= 0 && index < options.length) return options[index];
+      }
+      return String(value).trim();
+    }
+
+    function normalizeQuestionAnswerModel(question) {
+      if (!question || question.type === "label") return;
+
+      if (question.type === "tfng") {
+        question.options = [...TFNG_OPTIONS];
+        question.answer = canonicalTfngAnswer(question.answer);
+        return;
+      }
+
+      if (question.type === "mc" || question.type === "multi") {
+        const defaultOptionCount = question.type === "multi" ? 4 : 3;
+        const options = parseLegacyOptions(question.options);
+        if (!options.length) {
+          while (options.length < defaultOptionCount) options.push("");
+        }
+        question.options = options;
+
+        const rawAnswers = Array.isArray(question.answer)
+          ? question.answer
+          : question.type === "multi"
+            ? String(question.answer || "").split(/[,|]/)
+            : [question.answer];
+        const mapped = rawAnswers
+          .map(value => resolveChoiceReference(options, value))
+          .filter(value => normalizeComparable(value));
+        const unique = mapped.filter((value, index, list) =>
+          list.findIndex(item => normalizeComparable(item) === normalizeComparable(value)) === index
+        );
+        question.answer = question.type === "multi" ? unique : (unique[0] || "");
+        return;
+      }
+
+      delete question.options;
+      if (Array.isArray(question.answer)) {
+        question.answer = question.answer.map(value => String(value ?? "").trim()).filter(Boolean);
+      } else {
+        question.answer = String(question.answer ?? "");
+      }
+    }
+
+    function initializeQuestionType(question, nextType) {
+      const previousOptions = parseLegacyOptions(question.options);
+      question.type = nextType;
+
+      if (nextType === "tfng") {
+        question.options = [...TFNG_OPTIONS];
+        question.answer = "";
+      } else if (nextType === "mc" || nextType === "multi") {
+        const minimumOptions = nextType === "multi" ? 4 : 3;
+        question.options = previousOptions.length ? previousOptions : [];
+        while (question.options.length < minimumOptions) question.options.push("");
+        question.answer = nextType === "multi" ? [] : "";
+      } else {
+        delete question.options;
+        question.answer = "";
+      }
+    }
+
+    function choiceOptionIsCorrect(question, optionIndex) {
+      const option = (question.options || [])[optionIndex] || "";
+      if (!normalizeComparable(option)) return false;
+      if (question.type === "multi") {
+        return (Array.isArray(question.answer) ? question.answer : [])
+          .some(answer => normalizeComparable(answer) === normalizeComparable(option));
+      }
+      return normalizeComparable(question.answer) === normalizeComparable(option);
+    }
+
+    function setChoiceOptionText(question, optionIndex, nextValue) {
+      const previousValue = question.options[optionIndex] || "";
+      question.options[optionIndex] = nextValue;
+
+      if (question.type === "multi") {
+        const answers = Array.isArray(question.answer) ? question.answer : [];
+        question.answer = answers
+          .map(answer => normalizeComparable(answer) === normalizeComparable(previousValue) ? nextValue : answer)
+          .filter(answer => normalizeComparable(answer));
+      } else if (normalizeComparable(previousValue) && normalizeComparable(question.answer) === normalizeComparable(previousValue)) {
+        question.answer = normalizeComparable(nextValue) ? nextValue : "";
+      }
+    }
+
+    function questionAnswerErrors(question) {
+      if (!question || question.type === "label" || question.type === "fill") return [];
+      if (question.type === "tfng") {
+        return TFNG_OPTIONS.includes(question.answer) ? [] : ["Select True, False, or Not Given as the correct answer."];
+      }
+
+      const options = Array.isArray(question.options) ? question.options : [];
+      const nonEmpty = options.filter(option => normalizeComparable(option));
+      const errors = [];
+      const minimum = question.type === "multi" ? 3 : 2;
+      if (nonEmpty.length < minimum) errors.push(`Add at least ${minimum} non-empty options.`);
+      if (options.some(option => !normalizeComparable(option))) errors.push("Complete or remove every blank option.");
+      const normalizedOptions = nonEmpty.map(normalizeComparable);
+      if (new Set(normalizedOptions).size !== normalizedOptions.length) errors.push("Option text must be unique.");
+
+      if (question.type === "mc") {
+        const answer = normalizeComparable(question.answer);
+        if (!answer) errors.push("Select one correct option.");
+        else if (!normalizedOptions.includes(answer)) errors.push("The selected answer no longer matches an option.");
+      } else {
+        const answers = Array.isArray(question.answer) ? question.answer : [];
+        const normalizedAnswers = answers.map(normalizeComparable).filter(Boolean);
+        if (normalizedAnswers.length < 2) errors.push("Select at least two correct options.");
+        if (normalizedAnswers.some(answer => !normalizedOptions.includes(answer))) {
+          errors.push("Every correct answer must match an option.");
+        }
+        if (nonEmpty.length > 0 && normalizedAnswers.length >= nonEmpty.length) {
+          errors.push("Leave at least one distractor option unselected.");
+        }
+      }
+      return [...new Set(errors)];
+    }
+
+    function answerStatusMarkup(question, questionIndex) {
+      const errors = questionAnswerErrors(question);
+      if (!errors.length) {
+        return `<div class="answer-key-feedback is-complete" data-answer-validation="${questionIndex}">
+          <span class="answer-key-status">✓ Answer key complete</span>
+        </div>`;
+      }
+      return `<div class="answer-key-feedback is-incomplete" data-answer-validation="${questionIndex}">
+        <span class="answer-key-status">Answer key needs attention</span>
+        <ul>${errors.map(error => `<li>${error}</li>`).join("")}</ul>
+      </div>`;
+    }
+
+    function updateAnswerStatus(container, questionIndex, question) {
+      const current = container.querySelector(`[data-answer-validation="${questionIndex}"]`);
+      if (!current) return;
+      const scratch = document.createElement("div");
+      scratch.innerHTML = answerStatusMarkup(question, questionIndex);
+      current.replaceWith(scratch.firstElementChild);
+      const row = container.querySelector(`[data-question-index="${questionIndex}"]`);
+      if (row) row.classList.toggle("has-answer-errors", questionAnswerErrors(question).length > 0);
+    }
+
+    function collectAnswerKeyErrors() {
+      const errors = [];
+      [
+        { key: "listening", label: "Listening" },
+        { key: "reading", label: "Reading" }
+      ].forEach(section => {
+        (workingExam[section.key] || []).forEach((part, partIndex) => {
+          (part.questions || []).forEach((question, questionIndex) => {
+            questionAnswerErrors(question).forEach(message => {
+              errors.push({
+                section: section.key,
+                sectionLabel: section.label,
+                partIndex,
+                questionIndex,
+                questionId: question.id,
+                partTitle: part.title || `${section.label} ${partIndex + 1}`,
+                message
+              });
+            });
+          });
+        });
+      });
+      return errors;
+    }
+
+    function focusAnswerKeyError(error) {
+      const tabId = error.section === "listening" ? "btabListening" : "btabReading";
+      const tab = document.querySelector(`[data-btab="${tabId}"]`);
+      if (tab) tab.click();
+      const row = Array.from(document.querySelectorAll("[data-question-id]"))
+        .find(element => element.dataset.questionId === error.questionId);
+      if (!row) return;
+      row.classList.add("answer-error-focus");
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => row.classList.remove("answer-error-focus"), 1800);
+    }
+
+    function normalizeQuestionGroups(part, prefix) {
+      part.questions = Array.isArray(part.questions) ? part.questions : [];
+      part.questions.forEach(question => {
+        ensureQuestionId(question, `${prefix}q`);
+        normalizeQuestionAnswerModel(question);
+      });
+
+      const questionById = new Map(part.questions.map(question => [question.id, question]));
+      const usedIds = new Set();
+      let groups = Array.isArray(part.questionGroups) ? part.questionGroups : [];
+
+      groups = groups.map(group => {
+        const ids = Array.isArray(group.questionIds) ? group.questionIds : [];
+        const validIds = ids.filter(id => {
+          if (!questionById.has(id) || usedIds.has(id)) return false;
+          usedIds.add(id);
+          return true;
+        });
+        return {
+          id: group.id || makeId(`${prefix}g`),
+          label: group.label || "",
+          questionIds: validIds
+        };
+      });
+
+      if (!groups.length) {
+        groups = [{
+          id: makeId(`${prefix}g`),
+          label: part.questionLabel || part.instructions || "",
+          questionIds: []
+        }];
+      }
+
+      const unassigned = part.questions
+        .map(question => question.id)
+        .filter(id => !usedIds.has(id));
+      groups[groups.length - 1].questionIds.push(...unassigned);
+      part.questionGroups = groups;
+      syncPartQuestionOrder(part);
+      delete part.questionLabel;
+      delete part.instructions;
+    }
+
+    function syncPartQuestionOrder(part) {
+      const byId = new Map((part.questions || []).map(question => [question.id, question]));
+      const ordered = [];
+      const seen = new Set();
+
+      (part.questionGroups || []).forEach(group => {
+        group.questionIds = (group.questionIds || []).filter(id => {
+          if (!byId.has(id) || seen.has(id)) return false;
+          seen.add(id);
+          ordered.push(byId.get(id));
+          return true;
+        });
+      });
+
+      (part.questions || []).forEach(question => {
+        if (!seen.has(question.id)) {
+          seen.add(question.id);
+          ordered.push(question);
+          if (part.questionGroups && part.questionGroups.length) {
+            part.questionGroups[part.questionGroups.length - 1].questionIds.push(question.id);
+          }
+        }
+      });
+
+      part.questions = ordered;
+    }
+
+    function normalizeExamStructure() {
+      workingExam.listening = Array.isArray(workingExam.listening) ? workingExam.listening : [];
+      workingExam.reading = Array.isArray(workingExam.reading) ? workingExam.reading : [];
+      workingExam.writing = workingExam.writing || {};
+
+      workingExam.listening.forEach((part, index) => normalizeQuestionGroups(part, `l${index + 1}`));
+      workingExam.reading.forEach((part, index) => normalizeQuestionGroups(part, `r${index + 1}`));
+    }
+
+    function questionWeight(question) {
+      if (!question || question.type === "label") return 0;
+      if (question.type === "multi") {
+        const count = Array.isArray(question.answer) ? question.answer.length : 0;
+        return count > 0 ? count : 2;
+      }
+      return 1;
+    }
+
+    function sectionQuestionNumber(parts, partIndex, questionIndex) {
+      let count = 0;
+      for (let index = 0; index < partIndex; index += 1) {
+        count += (parts[index].questions || []).reduce((sum, question) => sum + questionWeight(question), 0);
+      }
+      const currentQuestions = parts[partIndex].questions || [];
+      for (let index = 0; index < questionIndex; index += 1) {
+        count += questionWeight(currentQuestions[index]);
+      }
+      return count + 1;
+    }
+
+    function questionRangeText(parts, partIndex, group) {
+      const part = parts[partIndex];
+      const indexById = new Map((part.questions || []).map((question, index) => [question.id, index]));
+      const numbers = [];
+      (group.questionIds || []).forEach(id => {
+        if (!indexById.has(id)) return;
+        const questionIndex = indexById.get(id);
+        const question = part.questions[questionIndex];
+        const weight = questionWeight(question);
+        if (weight <= 0) return; // labels contribute no question numbers
+        const start = sectionQuestionNumber(parts, partIndex, questionIndex);
+        for (let offset = 0; offset < weight; offset += 1) numbers.push(start + offset);
+      });
+
+      if (!numbers.length) return "No questions yet";
+      if (numbers.length === 1) return `Question ${numbers[0]}`;
+      const first = numbers[0];
+      const last = numbers[numbers.length - 1];
+      if (numbers.length === 2 && last === first + 1) return `Questions ${first} and ${last}`;
+      return `Questions ${first} - ${last}`;
+    }
+
+    function questionsForGroup(part, group) {
+      const byId = new Map((part.questions || []).map(question => [question.id, question]));
+      return (group.questionIds || []).map(id => byId.get(id)).filter(Boolean);
+    }
+
+    function removeQuestion(part, group, questionId) {
+      part.questions = (part.questions || []).filter(question => question.id !== questionId);
+      (part.questionGroups || []).forEach(item => {
+        item.questionIds = (item.questionIds || []).filter(id => id !== questionId);
+      });
+      group.questionIds = (group.questionIds || []).filter(id => id !== questionId);
+      syncPartQuestionOrder(part);
+    }
+
+    function removeQuestionGroup(part, groupIndex) {
+      if (!part.questionGroups || part.questionGroups.length <= 1) {
+        alert("Each part or passage needs at least one question group.");
+        return false;
+      }
+      const removed = part.questionGroups[groupIndex];
+      const targetIndex = groupIndex > 0 ? groupIndex - 1 : 1;
+      const target = part.questionGroups[targetIndex];
+      target.questionIds = groupIndex > 0
+        ? [...(target.questionIds || []), ...(removed.questionIds || [])]
+        : [...(removed.questionIds || []), ...(target.questionIds || [])];
+      part.questionGroups.splice(groupIndex, 1);
+      syncPartQuestionOrder(part);
+      return true;
+    }
+
+    function flushListeningGroupQuills() {
+      Object.keys(listeningGroupQuills).forEach(key => {
+        const meta = listeningGroupQuills[key];
+        const part = workingExam.listening[meta.partIndex];
+        const group = part && (part.questionGroups || []).find(item => item.id === meta.groupId);
+        if (group) group.label = cleanRichHtml(meta.quill.root.innerHTML);
+      });
+      Object.keys(listeningLabelQuills).forEach(key => {
+        const meta = listeningLabelQuills[key];
+        const part = workingExam.listening[meta.partIndex];
+        const question = part && (part.questions || []).find(item => item.id === meta.questionId);
+        if (question) question.text = cleanRichHtml(meta.quill.root.innerHTML);
+      });
+      workingExam.listening.forEach(syncPartQuestionOrder);
+    }
+
+    function flushReadingQuills() {
+      Object.keys(readingPassageQuills).forEach(key => {
+        const part = workingExam.reading[+key];
+        if (part) part.passage = cleanRichHtml(readingPassageQuills[key].root.innerHTML);
+      });
+      Object.keys(readingIntroQuills).forEach(key => {
+        const part = workingExam.reading[+key];
+        if (part) part.intro = cleanRichHtml(readingIntroQuills[key].root.innerHTML);
+      });
+      Object.keys(readingGroupQuills).forEach(key => {
+        const meta = readingGroupQuills[key];
+        const part = workingExam.reading[meta.partIndex];
+        const group = part && (part.questionGroups || []).find(item => item.id === meta.groupId);
+        if (group) group.label = cleanRichHtml(meta.quill.root.innerHTML);
+      });
+      Object.keys(readingLabelQuills).forEach(key => {
+        const meta = readingLabelQuills[key];
+        const part = workingExam.reading[meta.partIndex];
+        const question = part && (part.questions || []).find(item => item.id === meta.questionId);
+        if (question) question.text = cleanRichHtml(meta.quill.root.innerHTML);
+      });
+      workingExam.reading.forEach(syncPartQuestionOrder);
+    }
+
+    function resetListeningQuills() {
+      listeningGroupQuills = {};
+      listeningLabelQuills = {};
+    }
+
+    function resetReadingQuills() {
+      readingPassageQuills = {};
+      readingIntroQuills = {};
+      readingGroupQuills = {};
+      readingLabelQuills = {};
+    }
+
+    async function populateExamSelect() {
+      const select = document.getElementById("builderExamSelect");
+      select.innerHTML = `<option>Loading…</option>`;
+      const exams = await getExams();
+      select.innerHTML = "";
+      Object.values(exams).forEach(exam => {
+        const option = document.createElement("option");
+        option.value = exam.id;
+        option.textContent = exam.name;
+        select.appendChild(option);
+      });
+      const startId = requestedId && exams[requestedId] ? requestedId : select.value;
+      select.value = startId;
+      loadExam(exams[startId]);
+    }
+
+    document.getElementById("builderExamSelect").addEventListener("change", async event => {
+      if (hasUnsavedChanges && !confirm("Discard unsaved changes for this exam?")) {
+        event.target.value = workingExam.id;
+        return;
+      }
+      const exams = await getExams();
+      loadExam(exams[event.target.value]);
+    });
+
+    function loadExam(exam) {
+      if (!exam) return;
+      workingExam = JSON.parse(JSON.stringify(exam));
+      hasUnsavedChanges = false;
+      resetListeningQuills();
+      resetReadingQuills();
+      normalizeExamStructure();
+      renderListeningBuilder();
+      renderReadingBuilder();
+      task1Quill.root.innerHTML = workingExam.writing.task1Prompt || "";
+      document.getElementById("writingTask1Image").value = workingExam.writing.task1Image || "";
+      task2Quill.root.innerHTML = workingExam.writing.task2Prompt || "";
+    }
+
+    document.querySelectorAll(".builder-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".builder-tab").forEach(item => item.classList.remove("active"));
+        document.querySelectorAll(".builder-tab-pane").forEach(pane => pane.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(tab.dataset.btab).classList.add("active");
       });
     });
-  }
-  function partMarkup(section,part,pi){
-    return `<section class="part-card card" data-section="${section}" data-part-index="${pi}">
-      <div class="part-head"><div><strong>${escapeHtml(part.title||`${section==="listening"?"Part":"Passage"} ${pi+1}`)}</strong><div class="small muted">${(part.questions||[]).reduce((s,q)=>s+questionWeight(q),0)} numbered slots</div></div><div class="toolbar-row"><button class="btn btn-sm" data-action="add-group">+ Group</button><button class="btn btn-sm btn-danger" data-action="remove-part">Remove</button></div></div>
-      <div class="part-body stack">
-        <div class="field"><label>Title</label><input class="text-input" data-field="part-title" value="${escapeHtml(part.title||"")}"></div>
-        ${section==="listening"?`<div class="field"><label>Audio path or URL</label><input class="text-input" data-field="part-audio" value="${escapeHtml(part.audio||"")}" placeholder="assets/audio/part1.mp3"></div>`:`<div class="field"><label>Introduction</label><div class="composer-shell group-label-editor" data-intro-editor="${section}-${pi}"></div></div><div class="field"><label>Passage</label><div class="composer-shell" data-passage-editor="${section}-${pi}"></div></div>`}
-        <div>${(part.questionGroups||[]).map((g,gi)=>groupMarkup(section,part,g,pi,gi)).join("")}</div>
-      </div></section>`;
-  }
-  function groupMarkup(section,part,group,pi,gi){
-    const questions=group.questionIds.map(id=>part.questions.find(q=>q.id===id)).filter(Boolean);
-    return `<section class="group-card" data-group-index="${gi}">
-      <div class="group-head"><div><strong>Question group ${gi+1}</strong><span class="small muted"> · ${questions.length} items</span></div><div class="toolbar-row"><button class="btn btn-sm" data-action="preview-group">Student preview</button><button class="btn btn-sm btn-danger" data-action="remove-group">Remove</button></div></div>
-      <div class="group-body">
-        <label>Group instructions</label><div class="composer-shell group-label-editor" data-group-label="${section}-${pi}-${gi}"></div>
-        <div class="inline" style="margin-top:.8rem"><button class="btn btn-sm" data-action="add-block">+ Add IELTS Block</button><span class="small muted">Notes, table, option bank, flow chart, or TFNG key</span></div>
-        <div class="group-blocks">${(group.contentBlocks||[]).map((b,bi)=>blockEditorMarkup(b,bi)).join("")}</div>
-        <div class="question-list">${questions.map((q,qi)=>questionMarkup(part,q,pi,gi,qi)).join("")}</div>
-        <button class="btn btn-sm btn-primary" data-action="add-question">+ Add question</button>
-        <div class="preview-panel hidden" data-group-preview></div>
-      </div></section>`;
-  }
-  function questionMarkup(part,q,pi,gi,qi){
-    const number=questionNumber(state.activeSection,pi,q.id); const active=state.activeQuestion===q.id; const errors=answerErrors(q); const excerpt=stripHtml(q.text)||"Untitled question";
-    return `<article class="question-card ${active?"active":""} ${errors.length?"has-errors":""}" data-question-id="${q.id}">
-      <div class="question-summary" data-action="toggle-question"><span class="question-badge">${number}</span><div class="question-summary-text"><strong>${typeLabel(q.type)}</strong><div class="question-excerpt">${escapeHtml(excerpt)}</div></div><span class="status-pill ${errors.length?"":"complete"}">${errors.length?"Needs answer":"Complete ✓"}</span></div>
-      <div class="question-editor-panel">
-        <div class="inline"><label>Type</label><select class="select-input" data-field="question-type" style="width:auto"><option value="fill" ${q.type==="fill"?"selected":""}>Fill in the blank</option><option value="mc" ${q.type==="mc"?"selected":""}>Multiple choice</option><option value="multi" ${q.type==="multi"?"selected":""}>Choose multiple</option><option value="tfng" ${q.type==="tfng"?"selected":""}>True / False / Not Given</option><option value="label" ${q.type==="label"?"selected":""}>Unnumbered label</option></select><button class="btn btn-sm btn-danger" data-action="remove-question">Delete</button></div>
-        <div class="composer-actions" data-actions-for="${q.id}"><button data-format="bold"><b>B</b></button><button data-format="italic"><i>I</i></button><button data-format="underline"><u>U</u></button><button data-format="script" data-value="super">x²</button><button data-action="insert-blank">+ Blank</button><button data-action="symbols">Symbols</button><button data-action="insert-menu">Insert ▾</button><button data-action="preview-question">Preview</button></div>
-        <div class="composer-shell" data-composer="${q.id}"></div>
-        ${answerEditorMarkup(q)}
-        <div class="preview-panel hidden" data-question-preview></div>
-      </div></article>`;
-  }
-  function answerEditorMarkup(q){
-    if(q.type==="label")return"";
-    if(q.type==="fill"){const answer=Array.isArray(q.answer)?q.answer.join(" | "):q.answer||"";return `<div class="answer-editor"><label>Accepted answer(s)</label><input class="text-input" data-field="fill-answer" value="${escapeHtml(answer)}" placeholder="lake | the lake"><div class="small muted">Separate accepted alternatives with |. Existing questions without an inline token still show a fallback answer field.</div></div>`;}
-    if(q.type==="tfng")return `<div class="answer-editor"><label>Correct answer</label><div class="inline">${TFNG_OPTIONS.map(o=>`<label><input type="radio" data-field="single-answer" value="${o}" ${q.answer===o?"checked":""}> ${o}</label>`).join("")}</div></div>`;
-    return `<div class="answer-editor"><label>Options and answer key</label>${(q.options||[]).map((o,i)=>`<div class="option-row"><input type="${q.type==="multi"?"checkbox":"radio"}" name="correct-${q.id}" data-field="correct-option" data-option-index="${i}" ${isCorrect(q,o)?"checked":""}><input class="text-input" data-field="option-text" data-option-index="${i}" value="${escapeHtml(o)}" placeholder="Option ${String.fromCharCode(65+i)}"><button class="btn btn-sm" data-action="remove-option" data-option-index="${i}">×</button></div>`).join("")}<button class="btn btn-sm" data-action="add-option">+ Option</button><div class="answer-feedback ${answerErrors(q).length?"":"complete"}">${answerErrors(q).length?answerErrors(q).map(escapeHtml).join(" · "):"✓ Answer key complete"}</div></div>`;
-  }
-  function blockEditorMarkup(block,bi){
-    const head=`<div class="block-editor-head"><strong>${typeLabel(block.type)}</strong><div class="inline"><button class="btn btn-sm" data-action="move-block-up" data-block-index="${bi}">↑</button><button class="btn btn-sm" data-action="move-block-down" data-block-index="${bi}">↓</button><button class="btn btn-sm btn-danger" data-action="remove-block" data-block-index="${bi}">Remove</button></div></div>`;
-    if(block.type==="notes")return `<div class="block-editor" data-block-index="${bi}">${head}<div class="block-fields"><input class="text-input" data-block-field="title" value="${escapeHtml(block.title||"")}" placeholder="Notes card title">${(block.sections||[]).map((s,si)=>`<div class="card" style="padding:.7rem"><input class="text-input" data-note-heading="${si}" value="${escapeHtml(s.heading||"")}" placeholder="Section heading"><textarea data-note-rows="${si}" rows="3" placeholder="One row per line. Use [[blank:medium]]">${escapeHtml((s.rows||[]).join("\n"))}</textarea><button class="btn btn-sm btn-danger" data-action="remove-note-section" data-section-index="${si}">Remove section</button></div>`).join("")}<button class="btn btn-sm" data-action="add-note-section">+ Section</button></div></div>`;
-    if(block.type==="optionBank")return `<div class="block-editor" data-block-index="${bi}">${head}<div class="block-fields"><input class="text-input" data-block-field="title" value="${escapeHtml(block.title||"")}" placeholder="Option-bank title"><textarea data-block-field="options" rows="5" placeholder="One option per line">${escapeHtml((block.options||[]).join("\n"))}</textarea></div></div>`;
-    if(block.type==="flow")return `<div class="block-editor" data-block-index="${bi}">${head}<div class="block-fields"><input class="text-input" data-block-field="title" value="${escapeHtml(block.title||"")}" placeholder="Flow-chart title"><textarea data-block-field="steps" rows="6" placeholder="One step per line; use [[blank:medium]]">${escapeHtml((block.steps||[]).join("\n"))}</textarea></div></div>`;
-    if(block.type==="table"){const cols=Math.max(1,...(block.rows||[]).map(r=>r.length));return `<div class="block-editor" data-block-index="${bi}">${head}<div class="block-fields"><input class="text-input" data-block-field="title" value="${escapeHtml(block.title||"")}" placeholder="Table title"><label><input type="checkbox" data-block-field="headerRow" ${block.headerRow?"checked":""}> Header row</label><div class="table-editor-grid">${(block.rows||[]).map((row,ri)=>`<div class="table-editor-row">${Array.from({length:cols},(_,ci)=>`<input class="text-input" data-table-cell="${ri}-${ci}" value="${escapeHtml(row[ci]||"")}" placeholder="Cell">`).join("")}</div>`).join("")}</div><div class="inline"><button class="btn btn-sm" data-action="add-table-row">+ Row</button><button class="btn btn-sm" data-action="add-table-column">+ Column</button></div></div></div>`;}
-    if(block.type==="instructionKey")return `<div class="block-editor" data-block-index="${bi}">${head}<label>Preset <select class="select-input" data-block-field="preset"><option value="tfng" ${block.preset!=="ynng"?"selected":""}>True / False / Not Given</option><option value="ynng" ${block.preset==="ynng"?"selected":""}>Yes / No / Not Given</option></select></label></div>`;
-    return `<div class="block-editor" data-block-index="${bi}">${head}</div>`;
-  }
-  function renderWriting(){
-    const w=state.exam.writing||(state.exam.writing={}); const t1=$("#writingTask1Prompt"),t2=$("#writingTask2Prompt");
-    if(t1&&!t1.dataset.mounted) mountRichQuill(t1,w.task1Prompt||"",html=>w.task1Prompt=html,"Task 1 prompt…");
-    else if(t1?.__quillMeta){ t1.__quillMeta.set=html=>w.task1Prompt=html; t1.__quillMeta.quill.root.innerHTML=w.task1Prompt||""; }
-    if(t2&&!t2.dataset.mounted) mountRichQuill(t2,w.task2Prompt||"",html=>w.task2Prompt=html,"Task 2 prompt…");
-    else if(t2?.__quillMeta){ t2.__quillMeta.set=html=>w.task2Prompt=html; t2.__quillMeta.quill.root.innerHTML=w.task2Prompt||""; }
-    $("#writingTask1Image").value=w.task1Image||"";
-  }
-  function renderInspector(){
-    const box=$("#builderInspector"); if(!state.exam){box.innerHTML="";return;} const parts=[...(state.exam.listening||[]),...(state.exam.reading||[])]; const total=parts.reduce((s,p)=>s+(p.questions||[]).reduce((a,q)=>a+questionWeight(q),0),0); const incomplete=parts.flatMap(p=>p.questions||[]).filter(q=>answerErrors(q).length).length;
-    box.innerHTML=`<h3 style="margin-top:0">Exam health</h3><p><strong>${total}</strong> numbered answer slots</p><p><strong>${incomplete}</strong> questions need answer-key attention</p><hr style="border:0;border-top:1px solid var(--line)"><p class="small muted">New layouts are stored in <code>group.contentBlocks</code>. Existing <code>group.label</code> and question data remain supported.</p><button class="btn btn-primary" data-action="save" style="width:100%">Save exam</button>`;
-  }
 
-  function wireStaticActions(){
-    select.addEventListener("change",()=>chooseExam(select.value));
-    $("#examName").addEventListener("input",e=>{state.exam.name=e.target.value;markDirty();});
-    $("#writingTask1Image").addEventListener("input",e=>{state.exam.writing.task1Image=e.target.value;markDirty();});
-    document.querySelectorAll(".builder-tab").forEach(btn=>btn.addEventListener("click",()=>{flushEditors();state.activeSection=btn.dataset.section;renderAll();}));
-    $("#btnAddListeningPart").addEventListener("click",()=>addPart("listening")); $("#btnAddReadingPassage").addEventListener("click",()=>addPart("reading"));
-    $("#btnSubmitExam").addEventListener("click",save); $("#builderInspector").addEventListener("click",e=>{if(e.target.closest('[data-action="save"]'))save();});
-    $("#builderRoot").addEventListener("click",handleClick); $("#builderRoot").addEventListener("input",handleInput); $("#builderRoot").addEventListener("change",handleInput);
-    window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
-  }
-  function contextFrom(el){const partEl=el.closest("[data-part-index]");const groupEl=el.closest("[data-group-index]");const qEl=el.closest("[data-question-id]");const section=partEl?.dataset.section;const pi=Number(partEl?.dataset.partIndex);const gi=Number(groupEl?.dataset.groupIndex);const part=state.exam?.[section]?.[pi];const group=part?.questionGroups?.[gi];const question=qEl?part?.questions?.find(q=>q.id===qEl.dataset.questionId):null;return{section,pi,gi,part,group,question,qEl,groupEl,partEl};}
-  function handleClick(e){
-    const button=e.target.closest("button,[data-action]"); if(!button)return; const action=button.dataset.action; const format=button.dataset.format; if(!action&&!format)return; const c=contextFrom(button);
-    if(format&&c.question){const q=state.quills.get(c.question.id);if(q){const current=q.getFormat();q.format(format,button.dataset.value||!current[format]);}return;}
-    if(action==="toggle-question"){flushEditors();state.activeQuestion=state.activeQuestion===c.question.id?null:c.question.id;renderAll();return;}
-    if(action==="remove-part"){if(confirm("Remove this part and all of its questions?")){state.exam[c.section].splice(c.pi,1);markDirty();renderAll();}return;}
-    if(action==="add-group"){c.part.questionGroups.push({id:uid("group"),label:"",questionIds:[],contentBlocks:[]});markDirty();renderAll();return;}
-    if(action==="remove-group"){if(c.part.questionGroups.length===1)return alert("Each part needs at least one question group."); if(confirm("Remove this group? Its questions will move to the previous group.")){const removed=c.part.questionGroups.splice(c.gi,1)[0];c.part.questionGroups[Math.max(0,c.gi-1)].questionIds.push(...removed.questionIds);markDirty();renderAll();}return;}
-    if(action==="add-question"){const q=normalizeQuestion({id:uid("q"),type:"fill",text:"",answer:""});c.part.questions.push(q);c.group.questionIds.push(q.id);state.activeQuestion=q.id;markDirty();renderAll();return;}
-    if(action==="remove-question"){if(confirm("Delete this question?")){c.part.questions=c.part.questions.filter(q=>q.id!==c.question.id);c.part.questionGroups.forEach(g=>g.questionIds=g.questionIds.filter(id=>id!==c.question.id));state.activeQuestion=null;markDirty();renderAll();}return;}
-    if(action==="add-option"){c.question.options.push("");markDirty();renderAll();return;}
-    if(action==="remove-option"){const i=Number(button.dataset.optionIndex);const old=c.question.options[i];c.question.options.splice(i,1);if(c.question.type==="multi")c.question.answer=(c.question.answer||[]).filter(a=>a!==old);else if(c.question.answer===old)c.question.answer="";markDirty();renderAll();return;}
-    if(action==="insert-blank"){showBlankMenu(button,c.question);return;} if(action==="symbols"){showSymbols(button,c.question);return;} if(action==="insert-menu"){showInsertMenu(button,c.question);return;}
-    if(action==="preview-question"){const panel=c.qEl.querySelector("[data-question-preview]");panel.classList.toggle("hidden");panel.innerHTML=renderQuestion(c.question,questionNumber(c.section,c.pi,c.question.id),{preview:true});return;}
-    if(action==="preview-group"){const panel=c.groupEl.querySelector("[data-group-preview]");panel.classList.toggle("hidden");panel.innerHTML=groupPreview(c);return;}
-    if(action==="add-block"){showBlockMenu(button,c);return;}
-    if(action==="remove-block"){c.group.contentBlocks.splice(Number(button.dataset.blockIndex),1);markDirty();renderAll();return;}
-    if(action==="move-block-up"||action==="move-block-down"){const i=Number(button.dataset.blockIndex),j=action.endsWith("up")?i-1:i+1;if(j>=0&&j<c.group.contentBlocks.length){[c.group.contentBlocks[i],c.group.contentBlocks[j]]=[c.group.contentBlocks[j],c.group.contentBlocks[i]];markDirty();renderAll();}return;}
-    if(action==="add-note-section"){const b=c.group.contentBlocks[Number(button.closest("[data-block-index]").dataset.blockIndex)];b.sections.push({heading:"",rows:[""]});markDirty();renderAll();return;}
-    if(action==="remove-note-section"){const b=c.group.contentBlocks[Number(button.closest("[data-block-index]").dataset.blockIndex)];b.sections.splice(Number(button.dataset.sectionIndex),1);markDirty();renderAll();return;}
-    if(action==="add-table-row"||action==="add-table-column"){const b=c.group.contentBlocks[Number(button.closest("[data-block-index]").dataset.blockIndex)];const cols=Math.max(1,...b.rows.map(r=>r.length));if(action.endsWith("row"))b.rows.push(Array(cols).fill(""));else b.rows.forEach(r=>r.push(""));markDirty();renderAll();return;}
-  }
-  function handleInput(e){
-    const c=contextFrom(e.target); if(!c.part)return; const f=e.target.dataset.field;
-    if(f==="part-title")c.part.title=e.target.value;if(f==="part-audio")c.part.audio=e.target.value;
-    if(f==="question-type"){const type=e.target.value;c.question.type=type;if(type==="tfng"){c.question.options=[...TFNG_OPTIONS];c.question.answer="";}else if(type==="mc"||type==="multi"){c.question.options=["","",""];if(type==="multi")c.question.options.push("");c.question.answer=type==="multi"?[]:"";}else{delete c.question.options;c.question.answer="";}markDirty();renderAll();return;}
-    if(f==="fill-answer")c.question.answer=e.target.value.split("|").map(s=>s.trim()).filter(Boolean); if(f==="single-answer")c.question.answer=e.target.value;
-    if(f==="option-text"){const i=Number(e.target.dataset.optionIndex),old=c.question.options[i];c.question.options[i]=e.target.value;if(c.question.type==="multi")c.question.answer=(c.question.answer||[]).map(a=>a===old?e.target.value:a);else if(c.question.answer===old)c.question.answer=e.target.value;}
-    if(f==="correct-option"){const i=Number(e.target.dataset.optionIndex),value=c.question.options[i];if(c.question.type==="multi"){const set=new Set(c.question.answer||[]);e.target.checked?set.add(value):set.delete(value);c.question.answer=[...set].filter(Boolean);}else c.question.answer=e.target.checked?value:"";}
-    const blockEl=e.target.closest("[data-block-index]"); if(blockEl&&c.group){const b=c.group.contentBlocks[Number(blockEl.dataset.blockIndex)],bf=e.target.dataset.blockField;if(bf){if(["options","steps"].includes(bf))b[bf]=e.target.value.split(/\r?\n/);else if(bf==="headerRow")b[bf]=e.target.checked;else b[bf]=e.target.value;}if(e.target.dataset.noteHeading!==undefined)b.sections[Number(e.target.dataset.noteHeading)].heading=e.target.value;if(e.target.dataset.noteRows!==undefined)b.sections[Number(e.target.dataset.noteRows)].rows=e.target.value.split(/\r?\n/);if(e.target.dataset.tableCell){const[ri,ci]=e.target.dataset.tableCell.split("-").map(Number);b.rows[ri][ci]=e.target.value;}}
-    markDirty();renderInspector();
-  }
-  function addPart(section){const q=normalizeQuestion({id:uid("q"),type:"fill",text:"",answer:""});const p=normalizePart({title:"",audio:"",passage:"",intro:"",questions:[q],questionGroups:[{id:uid("group"),label:"",questionIds:[q.id],contentBlocks:[]}]});state.exam[section].push(p);state.activeSection=section;state.activeQuestion=q.id;markDirty();renderAll();}
-  async function save(){flushEditors();const errors=allAnswerErrors();if(errors.length&&!confirm(`${errors.length} answer-key issue(s) remain. Save the draft anyway?`))return;state.exam.name=$("#examName").value.trim()||"Untitled IELTS Exam";state.exam.writing.task1Image=$("#writingTask1Image").value.trim();const saved=await saveExam(state.exam);state.exams[saved.id]=saved;state.exam=saved;populateExamSelect(saved.id);state.dirty=false;$("#builderSaveMsg").textContent="Saved ✓";renderInspector();setTimeout(()=>$("#builderSaveMsg").textContent="",1800);}
-  function flushEditors(){state.quills.forEach((q,id)=>{const found=findQuestion(id);if(found)found.text=cleanHtml(q.root.innerHTML);});state.quills.clear();document.querySelectorAll("[data-quill-key]").forEach(el=>{const meta=el.__quillMeta;if(meta)meta.set(cleanHtml(meta.quill.root.innerHTML));});}
-  function findQuestion(id){for(const s of["listening","reading"])for(const p of state.exam[s]||[]){const q=(p.questions||[]).find(x=>x.id===id);if(q)return q;}return null;}
-  function mountRichQuill(el,html,set,placeholder,compact=false){if(el.dataset.mounted)return;el.dataset.mounted="1";const quill=new Quill(el,{theme:"snow",placeholder,modules:{toolbar:compact?[["bold","italic","underline"],[{list:"ordered"},{list:"bullet"}],["clean"]]:[[{header:[2,3,false]}],["bold","italic","underline"],[{script:"sub"},{script:"super"}],[{list:"ordered"},{list:"bullet"}],["blockquote","link","image"],["clean"]],clipboard:{matchVisual:false}}});quill.root.innerHTML=html||"";installPasteCleaner(quill);quill.on("text-change",debounce(()=>{el.__quillMeta?.set(cleanHtml(quill.root.innerHTML));markDirty();},200));el.__quillMeta={quill,set};el.dataset.quillKey=uid("rich");}
-  function mountQuestionQuill(el,question){if(state.quills.has(question.id))return;const quill=new Quill(el,{theme:"bubble",placeholder:"Write the student-facing question. Type /blank for an inline answer.",formats:["bold","italic","underline","script","link","list","answerSlot"],modules:{toolbar:false,clipboard:{matchVisual:false},keyboard:{bindings:{slash:{key:"/",handler(range){setTimeout(()=>maybeSlashMenu(quill,question,range.index),0);return true;}}}}}});quill.root.innerHTML=question.text||"";installPasteCleaner(quill);quill.on("text-change",debounce(()=>{question.text=cleanHtml(quill.root.innerHTML);markDirty();const summary=el.closest(".question-card")?.querySelector(".question-excerpt");if(summary)summary.textContent=stripHtml(question.text)||"Untitled question";},180));state.quills.set(question.id,quill);}
-  function installPasteCleaner(quill){quill.clipboard.addMatcher(Node.ELEMENT_NODE,(node,delta)=>{delta.ops=(delta.ops||[]).map(op=>{if(op.attributes){const keep={};["bold","italic","underline","list","script","link","header","blockquote","image"].forEach(k=>{if(op.attributes[k]!==undefined)keep[k]=op.attributes[k];});op.attributes=keep;}return op;});return delta;});quill.root.addEventListener("paste",()=>showToast("Formatting cleaned from pasted content"));}
-  function cleanHtml(html){const box=document.createElement("div");box.innerHTML=html||"";box.querySelectorAll("script,style,iframe,video").forEach(n=>n.remove());box.querySelectorAll("*").forEach(n=>{[...n.attributes].forEach(a=>{if(!["href","src","alt","class","data-list","target","rel","data-slot-id","data-slot-size","data-slot-label"].includes(a.name))n.removeAttribute(a.name);});if(n.hasAttribute("class")&&!n.classList.contains("ielts-answer-slot")&&![...n.classList].every(c=>c.startsWith("ql-")))n.removeAttribute("class");});return box.innerHTML==="<p><br></p>"?"":box.innerHTML;}
-  function insertBlank(question,size){const quill=state.quills.get(question.id);if(!quill)return;const range=quill.getSelection(true)||{index:Math.max(0,quill.getLength()-1)};quill.insertEmbed(range.index,"answerSlot",{id:uid("slot"),size,label:"Answer blank"},"user");quill.insertText(range.index+1," ","user");quill.setSelection(range.index+2,0,"silent");}
-  function showBlankMenu(anchor,q){popover(anchor,[...["short","medium","long"].map(size=>({label:`${size[0].toUpperCase()+size.slice(1)} blank`,run:()=>insertBlank(q,size)}))]);}
-  function showSymbols(anchor,q){const symbols=["£","$","€","%","°","×","÷","→","–","±","≤","≥","²","³"];popover(anchor,symbols.map(s=>({label:s,run:()=>{const quill=state.quills.get(q.id);const r=quill?.getSelection(true);if(quill&&r)quill.insertText(r.index,s,"user");}})),"symbol-popover");}
-  function showInsertMenu(anchor,q){popover(anchor,[{label:"Answer blank",run:()=>insertBlank(q,"medium")},{label:"Bullet list",run:()=>state.quills.get(q.id)?.format("list","bullet")},{label:"Numbered list",run:()=>state.quills.get(q.id)?.format("list","ordered")},{label:"Link",run:()=>{const url=prompt("Link URL");if(url)state.quills.get(q.id)?.format("link",url);}},{label:"Clear formatting",run:()=>{const quill=state.quills.get(q.id),r=quill?.getSelection();if(quill&&r)quill.removeFormat(r.index,r.length,"user");}}]);}
-  function maybeSlashMenu(quill,q,index){const text=quill.getText(Math.max(0,index-12),12);const match=text.match(/\/(blank|symbols)$/);if(!match)return;const start=index-match[0].length;quill.deleteText(start,match[0].length,"silent");if(match[1]==="blank")insertBlank(q,"medium");else showToast("Use the Symbols button to insert a character.");}
-  function showBlockMenu(anchor,c){popover(anchor,[{label:"Notes card",run:()=>addBlock(c,"notes")},{label:"Table",run:()=>addBlock(c,"table")},{label:"Option bank",run:()=>addBlock(c,"optionBank")},{label:"Flow chart",run:()=>addBlock(c,"flow")},{label:"TFNG instruction key",run:()=>addBlock(c,"instructionKey")}]);}
-  function addBlock(c,type){const presets={notes:{id:uid("block"),type,title:"Notes",sections:[{heading:"Heading",rows:["Add a note with [[blank:medium]]"]}]},table:{id:uid("block"),type,title:"Table",headerRow:true,rows:[["Heading 1","Heading 2"],["Item","[[blank:medium]]"]]},optionBank:{id:uid("block"),type,title:"Options",options:["First option","Second option","Third option"]},flow:{id:uid("block"),type,title:"Process",steps:["First step","Step with [[blank:medium]]","Final step"]},instructionKey:{id:uid("block"),type,preset:"tfng"}};c.group.contentBlocks.push(presets[type]);markDirty();renderAll();}
-  function popover(anchor,items,className="insert-popover"){document.querySelectorAll(".symbol-popover,.insert-popover").forEach(n=>n.remove());const pop=document.createElement("div");pop.className=className;items.forEach(item=>{const b=document.createElement("button");b.textContent=item.label;b.onclick=()=>{item.run();pop.remove();};pop.appendChild(b);});document.body.appendChild(pop);const r=anchor.getBoundingClientRect();pop.style.left=`${Math.min(innerWidth-pop.offsetWidth-12,r.left)}px`;pop.style.top=`${r.bottom+scrollY+6}px`;setTimeout(()=>document.addEventListener("click",ev=>{if(!pop.contains(ev.target)&&ev.target!==anchor)pop.remove();},{once:true}),0);}
-  function groupPreview(c){let n=questionNumber(c.section,c.pi,c.group.questionIds[0]);return `<div class="student-group"><div class="student-group-label">${c.group.label||""}</div>${(c.group.contentBlocks||[]).map(b=>renderContentBlock(b,{disabled:true})).join("")}${c.group.questionIds.map(id=>{const q=c.part.questions.find(x=>x.id===id);if(!q)return"";const html=renderQuestion(q,n,{preview:true});n+=questionWeight(q);return html;}).join("")}</div>`;}
-  function questionNumber(section,pi,qid){let n=1;const parts=state.exam[section]||[];for(let p=0;p<parts.length;p++){for(const q of parts[p].questions||[]){if(p===pi&&q.id===qid)return n;n+=questionWeight(q);}}return n;}
-  function typeLabel(type){return({fill:"Fill in the blank",mc:"Multiple choice",multi:"Choose multiple",tfng:"True / False / Not Given",label:"Instruction label",notes:"Notes card",optionBank:"Option bank",table:"Table",flow:"Flow chart",instructionKey:"Instruction key"})[type]||type;}
-  function isCorrect(q,o){return q.type==="multi"?(q.answer||[]).includes(o):q.answer===o;}
-  function answerErrors(q){if(q.type==="label")return[];if(q.type==="fill")return(Array.isArray(q.answer)?q.answer.length:String(q.answer||"").trim())?[]:["Add an accepted answer."];if(q.type==="tfng")return TFNG_OPTIONS.includes(q.answer)?[]:["Select the correct answer."];const options=(q.options||[]).filter(o=>String(o).trim());const errors=[];if(options.length<(q.type==="multi"?3:2))errors.push("Add enough options.");if((q.options||[]).some(o=>!String(o).trim()))errors.push("Complete or remove blank options.");if(q.type==="multi"?(q.answer||[]).length<2:!q.answer)errors.push("Select the correct answer.");return errors;}
-  function allAnswerErrors(){return[...(state.exam.listening||[]),...(state.exam.reading||[])].flatMap(p=>(p.questions||[]).flatMap(q=>answerErrors(q)));}
-  function showToast(text){const t=document.createElement("div");t.className="paste-toast";t.textContent=text;document.body.appendChild(t);setTimeout(()=>t.remove(),1800);}
-}
+    function updateVisibleQuestionRanges(section) {
+      const parts = section === "listening" ? workingExam.listening : workingExam.reading;
+      document.querySelectorAll(`[data-range-section="${section}"]`).forEach(chip => {
+        const partIndex = Number(chip.dataset.rangePart);
+        const part = parts[partIndex];
+        const group = part && (part.questionGroups || []).find(item => item.id === chip.dataset.rangeGroup);
+        if (part && group) chip.textContent = questionRangeText(parts, partIndex, group);
+      });
+    }
 
-function registerAnswerSlotBlot(){
-  if(typeof Quill==="undefined"||Quill.imports?.formats?.answerSlot)return;
-  const Embed=Quill.import("blots/embed");
-  class AnswerSlotBlot extends Embed{
-    static create(value={}){const node=super.create();node.setAttribute("contenteditable","false");node.dataset.slotId=value.id||uid("slot");node.dataset.slotSize=value.size||"medium";node.dataset.slotLabel=value.label||"Answer blank";node.textContent=value.label||"Answer blank";return node;}
-    static value(node){return{id:node.dataset.slotId,size:node.dataset.slotSize,label:node.dataset.slotLabel};}
-  }
-  AnswerSlotBlot.blotName="answerSlot";AnswerSlotBlot.tagName="SPAN";AnswerSlotBlot.className="ielts-answer-slot";Quill.register(AnswerSlotBlot,true);
-}
+    function renderQuestionGroup(options) {
+      const {
+        card,
+        section,
+        parts,
+        part,
+        partIndex,
+        group,
+        groupIndex,
+        refresh
+      } = options;
+      const rangeText = questionRangeText(parts, partIndex, group);
+      const groupCard = document.createElement("section");
+      groupCard.className = "question-group-editor-card";
+      groupCard.innerHTML = `
+        <div class="question-group-editor-head">
+          <div>
+            <strong>Question Group ${groupIndex + 1}</strong>
+            <span class="question-range-chip" data-range-section="${section}" data-range-part="${partIndex}" data-range-group="${group.id}">${rangeText}</span>
+          </div>
+          <button class="btn btn-danger btn-sm" type="button" data-remove-group="${group.id}">Remove Group</button>
+        </div>
+        <label class="builder-field-label">Question label / instructions</label>
+        <p class="muted small builder-help">The question range is calculated automatically. Format the task directions here; use the image button for maps, diagrams, or table screenshots stored in the repository.</p>
+        <div class="rich-editor question-label-editor" data-group-editor="${group.id}"></div>
+        <div data-group-questions="${group.id}"></div>
+        <div class="builder-add-row">
+          <button class="btn btn-ghost btn-sm" type="button" data-add-group-question="${group.id}">+ Add Question to This Group</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-add-group-label="${group.id}">+ Add Label / Text Block</button>
+        </div>`;
+      card.appendChild(groupCard);
+
+      const editorElement = groupCard.querySelector(`[data-group-editor="${group.id}"]`);
+      const groupPlaceholder = rangeText === "No questions yet"
+        ? GROUP_LABEL_PLACEHOLDER
+        : [
+            rangeText,
+            "Complete the notes below.",
+            "Write ONE WORD AND / OR A NUMBER for each answer."
+          ].join("\n");
+      const editor = createRichEditor(editorElement, group.label || "", groupPlaceholder);
+      const key = `${partIndex}:${group.id}`;
+      const target = { quill: editor, partIndex, groupId: group.id };
+      if (section === "listening") listeningGroupQuills[key] = target;
+      else readingGroupQuills[key] = target;
+
+      const questionContainer = groupCard.querySelector(`[data-group-questions="${group.id}"]`);
+      renderQuestionEditors(questionContainer, questionsForGroup(part, group), {
+        section,
+        partIndex,
+        onWeightChange: () => updateVisibleQuestionRanges(section),
+        onDelete: question => {
+          removeQuestion(part, group, question.id);
+          markDirty();
+          refresh();
+        },
+        onMoveUp: question => {
+          const position = group.questionIds.indexOf(question.id);
+          if (position <= 0) return;
+          [group.questionIds[position - 1], group.questionIds[position]] =
+            [group.questionIds[position], group.questionIds[position - 1]];
+          syncPartQuestionOrder(part);
+          markDirty();
+          refresh();
+        },
+        onMoveDown: question => {
+          const position = group.questionIds.indexOf(question.id);
+          if (position === -1 || position >= group.questionIds.length - 1) return;
+          [group.questionIds[position], group.questionIds[position + 1]] =
+            [group.questionIds[position + 1], group.questionIds[position]];
+          syncPartQuestionOrder(part);
+          markDirty();
+          refresh();
+        }
+      });
+
+      groupCard.querySelector(`[data-add-group-question="${group.id}"]`).addEventListener("click", () => {
+        const question = { id: makeId(section === "listening" ? "lq" : "rq"), type: "fill", text: "", answer: "" };
+        part.questions.push(question);
+        group.questionIds.push(question.id);
+        syncPartQuestionOrder(part);
+        markDirty();
+        refresh();
+      });
+
+      groupCard.querySelector(`[data-add-group-label="${group.id}"]`).addEventListener("click", () => {
+        const label = { id: makeId(section === "listening" ? "ll" : "rl"), type: "label", text: "" };
+        part.questions.push(label);
+        group.questionIds.push(label.id);
+        syncPartQuestionOrder(part);
+        markDirty();
+        refresh();
+      });
+
+      groupCard.querySelector(`[data-remove-group="${group.id}"]`).addEventListener("click", () => {
+        if (!confirm("Remove this question group? Its questions will be kept and moved into the adjacent group.")) return;
+        if (removeQuestionGroup(part, groupIndex)) {
+          markDirty();
+          refresh();
+        }
+      });
+    }
+
+    function refreshListeningBuilder() {
+      flushListeningGroupQuills();
+      resetListeningQuills();
+      renderListeningBuilder();
+    }
+
+    function renderListeningBuilder() {
+      const wrap = document.getElementById("listeningPartsList");
+      wrap.innerHTML = "";
+
+      workingExam.listening.forEach((part, partIndex) => {
+        normalizeQuestionGroups(part, `l${partIndex + 1}`);
+        const card = document.createElement("div");
+        card.className = "builder-part-card enhanced-builder-card";
+        card.innerHTML = `
+          <div class="builder-part-head">
+            <input type="text" class="text-input" style="width:auto;flex:1;margin-right:10px;" value="${escapeAttribute(part.title)}" data-lp-title="${partIndex}">
+            <button class="btn btn-danger btn-sm" type="button" data-lp-del="${partIndex}">Remove Part</button>
+          </div>
+          <label class="builder-field-label">MP3 filename/path</label>
+          <p class="muted small builder-help">Keep the audio in <code>assets/audio/</code> and enter its repository path.</p>
+          <input type="text" class="text-input" value="${escapeAttribute(part.audio)}" data-lp-audio="${partIndex}" placeholder="assets/audio/part1.mp3">
+          <div class="question-groups-wrap" data-lp-groups="${partIndex}"></div>
+          <button class="btn btn-ghost btn-sm" type="button" data-lp-add-group="${partIndex}">+ Add Question Group</button>`;
+        wrap.appendChild(card);
+
+        const groupWrap = card.querySelector(`[data-lp-groups="${partIndex}"]`);
+        part.questionGroups.forEach((group, groupIndex) => {
+          renderQuestionGroup({
+            card: groupWrap,
+            section: "listening",
+            parts: workingExam.listening,
+            part,
+            partIndex,
+            group,
+            groupIndex,
+            refresh: refreshListeningBuilder
+          });
+        });
+      });
+
+      wrap.querySelectorAll("[data-lp-title]").forEach(input => input.addEventListener("input", event => {
+        workingExam.listening[+event.target.dataset.lpTitle].title = event.target.value;
+        markDirty();
+      }));
+      wrap.querySelectorAll("[data-lp-audio]").forEach(input => input.addEventListener("input", event => {
+        workingExam.listening[+event.target.dataset.lpAudio].audio = event.target.value;
+        markDirty();
+      }));
+      wrap.querySelectorAll("[data-lp-del]").forEach(button => button.addEventListener("click", event => {
+        flushListeningGroupQuills();
+        workingExam.listening.splice(+event.target.dataset.lpDel, 1);
+        resetListeningQuills();
+        markDirty();
+        renderListeningBuilder();
+      }));
+      wrap.querySelectorAll("[data-lp-add-group]").forEach(button => button.addEventListener("click", event => {
+        const part = workingExam.listening[+event.target.dataset.lpAddGroup];
+        part.questionGroups.push({ id: makeId("lg"), label: "", questionIds: [] });
+        markDirty();
+        refreshListeningBuilder();
+      }));
+    }
+
+    document.getElementById("btnAddListeningPart").addEventListener("click", () => {
+      if (workingExam.listening.length >= 4) {
+        alert("Maximum 4 listening parts.");
+        return;
+      }
+      flushListeningGroupQuills();
+      const partNumber = workingExam.listening.length + 1;
+      workingExam.listening.push({
+        title: `Part ${partNumber}`,
+        audio: "",
+        questions: [],
+        questionGroups: [{ id: makeId("lg"), label: "", questionIds: [] }]
+      });
+      resetListeningQuills();
+      markDirty();
+      renderListeningBuilder();
+    });
+
+    function refreshReadingBuilder() {
+      flushReadingQuills();
+      resetReadingQuills();
+      renderReadingBuilder();
+    }
+
+    function renderReadingBuilder() {
+      const wrap = document.getElementById("readingPassagesList");
+      wrap.innerHTML = "";
+
+      workingExam.reading.forEach((part, partIndex) => {
+        normalizeQuestionGroups(part, `r${partIndex + 1}`);
+        const card = document.createElement("div");
+        card.className = "builder-part-card enhanced-builder-card";
+        card.innerHTML = `
+          <div class="builder-part-head">
+            <input type="text" class="text-input" style="width:auto;flex:1;margin-right:10px;" value="${escapeAttribute(part.title)}" data-rp-title="${partIndex}">
+            <button class="btn btn-danger btn-sm" type="button" data-rp-del="${partIndex}">Remove Passage</button>
+          </div>
+          <label class="builder-field-label">Passage introduction / timing note</label>
+          <div class="rich-editor compact-rich-editor" data-rp-intro="${partIndex}"></div>
+          <label class="builder-field-label">Passage text</label>
+          <p class="muted small builder-help">Use headings, lists, links, and repository-hosted images. Pasted tables are styled responsively in the student view.</p>
+          <div class="rich-editor passage-rich-editor" data-rp-passage="${partIndex}"></div>
+          <div class="question-groups-wrap" data-rp-groups="${partIndex}"></div>
+          <button class="btn btn-ghost btn-sm" type="button" data-rp-add-group="${partIndex}">+ Add Question Group</button>`;
+        wrap.appendChild(card);
+
+        readingIntroQuills[partIndex] = createRichEditor(
+          card.querySelector(`[data-rp-intro="${partIndex}"]`),
+          part.intro || "",
+          READING_INTRO_PLACEHOLDER
+        );
+        readingPassageQuills[partIndex] = createRichEditor(
+          card.querySelector(`[data-rp-passage="${partIndex}"]`),
+          part.passage || "",
+          "Paste or type the reading passage here."
+        );
+
+        const groupWrap = card.querySelector(`[data-rp-groups="${partIndex}"]`);
+        part.questionGroups.forEach((group, groupIndex) => {
+          renderQuestionGroup({
+            card: groupWrap,
+            section: "reading",
+            parts: workingExam.reading,
+            part,
+            partIndex,
+            group,
+            groupIndex,
+            refresh: refreshReadingBuilder
+          });
+        });
+      });
+
+      wrap.querySelectorAll("[data-rp-title]").forEach(input => input.addEventListener("input", event => {
+        workingExam.reading[+event.target.dataset.rpTitle].title = event.target.value;
+        markDirty();
+      }));
+      wrap.querySelectorAll("[data-rp-del]").forEach(button => button.addEventListener("click", event => {
+        flushReadingQuills();
+        workingExam.reading.splice(+event.target.dataset.rpDel, 1);
+        resetReadingQuills();
+        markDirty();
+        renderReadingBuilder();
+      }));
+      wrap.querySelectorAll("[data-rp-add-group]").forEach(button => button.addEventListener("click", event => {
+        const part = workingExam.reading[+event.target.dataset.rpAddGroup];
+        part.questionGroups.push({ id: makeId("rg"), label: "", questionIds: [] });
+        markDirty();
+        refreshReadingBuilder();
+      }));
+    }
+
+    document.getElementById("btnAddReadingPassage").addEventListener("click", () => {
+      if (workingExam.reading.length >= 3) {
+        alert("Maximum 3 reading passages.");
+        return;
+      }
+      flushReadingQuills();
+      const passageNumber = workingExam.reading.length + 1;
+      workingExam.reading.push({
+        title: `Passage ${passageNumber}`,
+        intro: "",
+        passage: "",
+        questions: [],
+        questionGroups: [{ id: makeId("rg"), label: "", questionIds: [] }]
+      });
+      resetReadingQuills();
+      markDirty();
+      renderReadingBuilder();
+    });
+
+    function renderQuestionEditors(container, questions, config = {}) {
+      container.innerHTML = "";
+      questions.forEach((question, questionIndex) => {
+        normalizeQuestionAnswerModel(question);
+
+        if (question.type === "label") {
+          const row = document.createElement("div");
+          row.className = "builder-question-row enhanced-question-row label-question-row";
+          row.dataset.questionId = question.id;
+          row.dataset.questionIndex = questionIndex;
+          row.innerHTML = `
+            <div style="flex:1;">
+              <label class="builder-field-label" style="margin-top:0;">Label / text block (not a question — not scored)</label>
+              <div class="rich-editor label-block-editor" data-label-editor="${question.id}"></div>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-ghost btn-sm row-move" type="button" data-q-up="${questionIndex}" ${questionIndex === 0 ? "disabled" : ""} title="Move up">&uarr;</button>
+              <button class="btn btn-ghost btn-sm row-move" type="button" data-q-down="${questionIndex}" ${questionIndex === questions.length - 1 ? "disabled" : ""} title="Move down">&darr;</button>
+              <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>
+            </div>`;
+          container.appendChild(row);
+          return;
+        }
+
+        const isMultipleChoice = question.type === "mc";
+        const isMultipleAnswer = question.type === "multi";
+        const isTfng = question.type === "tfng";
+        const multiWeight = isMultipleAnswer ? questionWeight(question) : 0;
+        let answerEditor = "";
+
+        if (isMultipleChoice || isMultipleAnswer) {
+          const selectionType = isMultipleAnswer ? "checkbox" : "radio";
+          const instruction = isMultipleAnswer
+            ? "Tick every correct option. Each selected correct option becomes one numbered IELTS answer."
+            : "Choose exactly one correct option.";
+          const optionRows = (question.options || []).map((option, optionIndex) => {
+            const optionReady = normalizeComparable(option);
+            return `
+              <div class="choice-option-editor-row">
+                <label class="correct-option-toggle" title="Mark option ${optionLetter(optionIndex)} as correct">
+                  <input type="${selectionType}" name="correct-${question.id}" data-q-correct="${questionIndex}" data-option-index="${optionIndex}" ${choiceOptionIsCorrect(question, optionIndex) ? "checked" : ""} ${optionReady ? "" : "disabled"}>
+                  <span class="choice-option-letter">${optionLetter(optionIndex)}</span>
+                </label>
+                <input type="text" class="text-input choice-option-input" placeholder="Option ${optionLetter(optionIndex)}" value="${escapeAttribute(option)}" data-q-option="${questionIndex}" data-option-index="${optionIndex}" data-previous-weight="${questionWeight(question)}">
+                <button class="btn btn-ghost btn-sm choice-option-remove" type="button" data-q-option-remove="${questionIndex}" data-option-index="${optionIndex}" aria-label="Remove option ${optionLetter(optionIndex)}">Remove</button>
+              </div>`;
+          }).join("");
+          answerEditor = `
+            <div class="answer-key-panel">
+              <div class="answer-key-panel-head">
+                <div>
+                  <strong>Options and correct answer${isMultipleAnswer ? "s" : ""}</strong>
+                  <p>${instruction}</p>
+                </div>
+                ${isMultipleAnswer ? `<span class="multi-weight-pill" data-multi-weight="${questionIndex}">${multiWeight} answer slots</span>` : ""}
+              </div>
+              <div class="choice-option-editor-list">${optionRows}</div>
+              <button class="btn btn-ghost btn-sm" type="button" data-q-option-add="${questionIndex}">+ Add option</button>
+            </div>`;
+        } else if (isTfng) {
+          answerEditor = `
+            <div class="answer-key-panel tfng-answer-panel">
+              <div class="answer-key-panel-head">
+                <div>
+                  <strong>Correct answer</strong>
+                  <p>The student options are fixed and displayed in this order.</p>
+                </div>
+              </div>
+              <div class="tfng-answer-grid">
+                ${TFNG_OPTIONS.map(option => `
+                  <label class="tfng-answer-choice ${question.answer === option ? "is-selected" : ""}">
+                    <input type="radio" name="tfng-${question.id}" value="${option}" data-q-tfng="${questionIndex}" ${question.answer === option ? "checked" : ""}>
+                    <span>${option}</span>
+                  </label>`).join("")}
+              </div>
+            </div>`;
+        } else {
+          const answerValue = Array.isArray(question.answer) ? question.answer.join(" | ") : (question.answer || "");
+          answerEditor = `
+            <div class="answer-key-panel fill-answer-panel">
+              <label class="builder-field-label" style="margin-top:0;">Accepted answer${Array.isArray(question.answer) && question.answer.length > 1 ? "s" : ""}</label>
+              <input type="text" class="text-input" placeholder="Correct answer; use | between accepted alternatives" value="${escapeAttribute(answerValue)}" data-q-ans="${questionIndex}">
+              <p class="muted small answer-help">Example: <code>10 | ten</code> accepts either spelling. Matching ignores capitalization and surrounding spaces.</p>
+            </div>`;
+        }
+
+        const errors = questionAnswerErrors(question);
+        const row = document.createElement("div");
+        row.className = `builder-question-row enhanced-question-row question-authoring-card${errors.length ? " has-answer-errors" : ""}`;
+        row.dataset.questionId = question.id;
+        row.dataset.questionIndex = questionIndex;
+        row.innerHTML = `
+          <div class="question-authoring-main">
+            <div class="question-authoring-toolbar">
+              <select data-q-type="${questionIndex}" aria-label="Question type">
+                <option value="fill" ${question.type === "fill" ? "selected" : ""}>Fill in the blank</option>
+                <option value="mc" ${isMultipleChoice ? "selected" : ""}>Multiple choice — one answer</option>
+                <option value="multi" ${isMultipleAnswer ? "selected" : ""}>Multiple choice — several answers</option>
+                <option value="tfng" ${isTfng ? "selected" : ""}>True / False / Not Given</option>
+              </select>
+              ${isMultipleAnswer ? `<span class="muted small multi-weight-hint">Numbering uses ${multiWeight} answer slots</span>` : ""}
+            </div>
+            <label class="builder-field-label">Question text</label>
+            <input type="text" class="text-input" placeholder="Question text" value="${escapeAttribute(question.text)}" data-q-text="${questionIndex}">
+            ${answerEditor}
+            ${answerStatusMarkup(question, questionIndex)}
+          </div>
+          <div class="row-actions">
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-q-up="${questionIndex}" ${questionIndex === 0 ? "disabled" : ""} title="Move up">&uarr;</button>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-q-down="${questionIndex}" ${questionIndex === questions.length - 1 ? "disabled" : ""} title="Move down">&darr;</button>
+            <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>
+          </div>`;
+        container.appendChild(row);
+      });
+
+      container.querySelectorAll("[data-label-editor]").forEach(element => {
+        const questionId = element.dataset.labelEditor;
+        const question = questions.find(item => item.id === questionId);
+        if (!question) return;
+        const quill = createRichEditor(
+          element,
+          question.text || "",
+          "Enter instructional text or a sub-heading — this will not be scored (e.g. \"Typical jobs\")."
+        );
+        const map = config.section === "listening" ? listeningLabelQuills : readingLabelQuills;
+        map[questionId] = { quill, partIndex: config.partIndex, questionId };
+      });
+
+      container.querySelectorAll("[data-q-type]").forEach(select => select.addEventListener("change", event => {
+        const questionIndex = Number(event.target.dataset.qType);
+        const question = questions[questionIndex];
+        const previousWeight = questionWeight(question);
+        initializeQuestionType(question, event.target.value);
+        markDirty();
+        renderQuestionEditors(container, questions, config);
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+      }));
+
+      container.querySelectorAll("[data-q-text]").forEach(input => input.addEventListener("input", event => {
+        questions[Number(event.target.dataset.qText)].text = event.target.value;
+        markDirty();
+      }));
+
+      container.querySelectorAll("[data-q-option]").forEach(input => {
+        input.addEventListener("input", event => {
+          const questionIndex = Number(event.target.dataset.qOption);
+          const optionIndex = Number(event.target.dataset.optionIndex);
+          const question = questions[questionIndex];
+          setChoiceOptionText(question, optionIndex, event.target.value);
+          const toggle = event.target.closest(".choice-option-editor-row").querySelector("[data-q-correct]");
+          if (toggle) {
+            toggle.disabled = !normalizeComparable(event.target.value);
+            toggle.checked = choiceOptionIsCorrect(question, optionIndex);
+          }
+          markDirty();
+          updateAnswerStatus(container, questionIndex, question);
+        });
+        input.addEventListener("change", event => {
+          const question = questions[Number(event.target.dataset.qOption)];
+          const previousWeight = Number(event.target.dataset.previousWeight || 1);
+          if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+          event.target.dataset.previousWeight = questionWeight(question);
+        });
+      });
+
+      container.querySelectorAll("[data-q-correct]").forEach(input => input.addEventListener("change", event => {
+        const questionIndex = Number(event.target.dataset.qCorrect);
+        const optionIndex = Number(event.target.dataset.optionIndex);
+        const question = questions[questionIndex];
+        const option = question.options[optionIndex] || "";
+        if (!normalizeComparable(option)) return;
+        const previousWeight = questionWeight(question);
+
+        if (question.type === "multi") {
+          const answers = Array.isArray(question.answer) ? [...question.answer] : [];
+          const existingIndex = answers.findIndex(answer => normalizeComparable(answer) === normalizeComparable(option));
+          if (event.target.checked && existingIndex === -1) answers.push(option);
+          if (!event.target.checked && existingIndex >= 0) answers.splice(existingIndex, 1);
+          question.answer = answers;
+        } else {
+          question.answer = option;
+        }
+
+        markDirty();
+        updateAnswerStatus(container, questionIndex, question);
+        const weightPill = container.querySelector(`[data-multi-weight="${questionIndex}"]`);
+        if (weightPill) weightPill.textContent = `${questionWeight(question)} answer slots`;
+        const toolbarHint = container.querySelector(`[data-question-index="${questionIndex}"] .multi-weight-hint`);
+        if (toolbarHint) toolbarHint.textContent = `Numbering uses ${questionWeight(question)} answer slots`;
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+      }));
+
+      container.querySelectorAll("[data-q-tfng]").forEach(input => input.addEventListener("change", event => {
+        const questionIndex = Number(event.target.dataset.qTfng);
+        const question = questions[questionIndex];
+        question.answer = event.target.value;
+        container.querySelectorAll(`[data-q-tfng="${questionIndex}"]`).forEach(choice => {
+          choice.closest(".tfng-answer-choice").classList.toggle("is-selected", choice.checked);
+        });
+        markDirty();
+        updateAnswerStatus(container, questionIndex, question);
+      }));
+
+      container.querySelectorAll("[data-q-option-add]").forEach(button => button.addEventListener("click", event => {
+        const questionIndex = Number(event.target.dataset.qOptionAdd);
+        questions[questionIndex].options.push("");
+        markDirty();
+        renderQuestionEditors(container, questions, config);
+      }));
+
+      container.querySelectorAll("[data-q-option-remove]").forEach(button => button.addEventListener("click", event => {
+        const questionIndex = Number(event.target.dataset.qOptionRemove);
+        const optionIndex = Number(event.target.dataset.optionIndex);
+        const question = questions[questionIndex];
+        const previousWeight = questionWeight(question);
+        const removed = question.options[optionIndex] || "";
+        question.options.splice(optionIndex, 1);
+        if (question.type === "multi") {
+          question.answer = (Array.isArray(question.answer) ? question.answer : [])
+            .filter(answer => normalizeComparable(answer) !== normalizeComparable(removed));
+        } else if (normalizeComparable(question.answer) === normalizeComparable(removed)) {
+          question.answer = "";
+        }
+        markDirty();
+        renderQuestionEditors(container, questions, config);
+        if (previousWeight !== questionWeight(question) && config.onWeightChange) config.onWeightChange();
+      }));
+
+      container.querySelectorAll("[data-q-ans]").forEach(input => input.addEventListener("input", event => {
+        const question = questions[Number(event.target.dataset.qAns)];
+        const alternatives = event.target.value.split("|").map(value => value.trim()).filter(Boolean);
+        question.answer = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
+        markDirty();
+      }));
+
+      container.querySelectorAll("[data-q-up]").forEach(button => button.addEventListener("click", event => {
+        const question = questions[Number(event.target.dataset.qUp)];
+        if (config.onMoveUp) config.onMoveUp(question);
+      }));
+      container.querySelectorAll("[data-q-down]").forEach(button => button.addEventListener("click", event => {
+        const question = questions[Number(event.target.dataset.qDown)];
+        if (config.onMoveDown) config.onMoveDown(question);
+      }));
+      container.querySelectorAll("[data-q-del]").forEach(button => button.addEventListener("click", event => {
+        const question = questions[Number(event.target.dataset.qDel)];
+        if (config.onDelete) config.onDelete(question);
+      }));
+    }
+
+    document.getElementById("writingTask1Image").addEventListener("input", markDirty);
+
+    document.getElementById("btnSubmitExam").addEventListener("click", async () => {
+      flushListeningGroupQuills();
+      flushReadingQuills();
+      workingExam.writing = {
+        task1Prompt: cleanRichHtml(task1Quill.root.innerHTML),
+        task1Image: document.getElementById("writingTask1Image").value,
+        task2Prompt: cleanRichHtml(task2Quill.root.innerHTML)
+      };
+      workingExam.builderSchemaVersion = 3;
+
+      const answerKeyErrors = collectAnswerKeyErrors();
+      if (answerKeyErrors.length) {
+        const firstItems = answerKeyErrors.slice(0, 8).map(error =>
+          `• ${error.sectionLabel} — ${error.partTitle}: ${error.message}`
+        );
+        const remaining = answerKeyErrors.length > firstItems.length
+          ? `\n…and ${answerKeyErrors.length - firstItems.length} more issue${answerKeyErrors.length - firstItems.length === 1 ? "" : "s"}.`
+          : "";
+        alert(`Please complete the answer keys before saving:\n\n${firstItems.join("\n")}${remaining}`);
+        focusAnswerKeyError(answerKeyErrors[0]);
+        return;
+      }
+
+      const button = document.getElementById("btnSubmitExam");
+      button.disabled = true;
+      button.textContent = "Saving...";
+      try {
+        await saveExam(workingExam);
+        hasUnsavedChanges = false;
+        const message = document.getElementById("builderSaveMsg");
+        message.textContent = "Exam saved ✓";
+        setTimeout(() => { message.textContent = ""; }, 2500);
+      } catch (error) {
+        console.error(error);
+        alert("The exam could not be saved. Please check your connection and try again.");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Submit Exam";
+      }
+    });
+
+    window.addEventListener("beforeunload", event => {
+      if (hasUnsavedChanges) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    });
+
+    populateExamSelect();
+  });
+});
