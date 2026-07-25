@@ -1,70 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Exam Builder — EHSAN IELTS Mock Test</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
-<link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
-</head>
-<body>
-<div class="admin-shell">
-  <aside class="admin-sidebar">
-    <div class="admin-brand">EHSAN<span>IELTS</span></div>
-    <nav class="admin-nav">
-      <a class="admin-nav-btn" href="teacher-dashboard.html">Exams</a>
-      <a class="admin-nav-btn active" href="teacher-builder.html">Exam Builder</a>
-      <a class="admin-nav-btn" href="teacher-submissions.html">Submissions</a>
-      <a class="admin-nav-btn" href="teacher-grading.html">Grading</a>
-    </nav>
-    <button class="btn sidebar-logout btn-sm" id="btnLogout" style="margin-top:auto;">Log Out</button>
-  </aside>
-  <main class="admin-main">
-    <div class="panel-head">
-      <h2>Exam Builder</h2>
-      <select id="builderExamSelect" class="text-input" style="max-width:260px;"></select>
-    </div>
-    <div class="builder-tabs">
-      <button class="builder-tab active" data-btab="btabListening">Listening</button>
-      <button class="builder-tab" data-btab="btabReading">Reading</button>
-      <button class="builder-tab" data-btab="btabWriting">Writing</button>
-    </div>
-    <div class="builder-tab-pane active" id="btabListening">
-      <p class="muted small">Add up to 4 parts. Each part has one audio file and its own questions.</p>
-      <div id="listeningPartsList"></div>
-      <button class="btn btn-ghost btn-sm" id="btnAddListeningPart">+ Add Listening Part</button>
-    </div>
-    <div class="builder-tab-pane" id="btabReading">
-      <p class="muted small">Add up to 3 passages. Each passage has its own passage text and questions.</p>
-      <div id="readingPassagesList"></div>
-      <button class="btn btn-ghost btn-sm" id="btnAddReadingPassage">+ Add Reading Passage</button>
-    </div>
-    <div class="builder-tab-pane" id="btabWriting">
-      <div class="field-block">
-        <label>Task 1 Prompt (report/letter)</label>
-        <div id="writingTask1Prompt" class="rich-editor"></div>
-        <label>Task 1 Image URL (optional — chart/diagram)</label>
-        <input type="text" id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png">
-      </div>
-      <div class="field-block">
-        <label>Task 2 Prompt (essay)</label>
-        <div id="writingTask2Prompt" class="rich-editor"></div>
-      </div>
-    </div>
-    <div class="submit-bar">
-      <button class="btn btn-primary" id="btnSubmitExam">Submit Exam</button>
-      <span id="builderSaveMsg" class="success-msg"></span>
-    </div>
-  </main>
-</div>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
-<script src="js/firebase-init.js"></script>
-<script src="js/common.js"></script>
-<script src="js/teacher-builder.js"></script>
-</body>
-</html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IELTS Question Composer — EHSAN IELTS Lab</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.bubble.css"><link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/exam-content-editors.css"></head><body>
+<div class="admin-shell"><aside class="admin-sidebar"><div class="admin-brand">EHSAN <span>IELTS</span></div><nav class="admin-nav"><a href="teacher-dashboard.html">Exams</a><a class="active" href="teacher-builder.html">Question Composer</a><a href="teacher-submissions.html">Submissions</a><a href="teacher-grading.html">Grading</a></nav><button class="btn btn-sm" id="btnLogout" style="margin-top:auto">Log out</button></aside>
+<main class="admin-main"><div class="panel-head"><div><h1>IELTS Question Composer</h1><p class="muted small">Focused editing, Cambridge-style blocks, and live student previews.</p></div><select id="builderExamSelect" class="select-input" style="max-width:300px"></select></div>
+<div class="field card" style="padding:1rem;margin-bottom:1rem"><label>Exam name</label><input id="examName" class="text-input"></div>
+<div class="builder-layout"><div class="builder-main" id="builderRoot"><div class="builder-tabs"><button class="builder-tab active" data-section="listening">Listening</button><button class="builder-tab" data-section="reading">Reading</button><button class="builder-tab" data-section="writing">Writing</button></div>
+<section class="builder-pane active" id="pane-listening"><div id="listeningPartsList"></div><button class="btn btn-primary" id="btnAddListeningPart">+ Add Listening Part</button></section>
+<section class="builder-pane" id="pane-reading"><div id="readingPartsList"></div><button class="btn btn-primary" id="btnAddReadingPassage">+ Add Reading Passage</button></section>
+<section class="builder-pane" id="pane-writing"><div class="card stack" style="padding:1rem"><div class="field"><label>Task 1 prompt</label><div id="writingTask1Prompt" class="composer-shell"></div></div><div class="field"><label>Task 1 image path or URL</label><input id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png"></div><div class="field"><label>Task 2 prompt</label><div id="writingTask2Prompt" class="composer-shell"></div></div></div></section>
+<div class="sticky-save"><span id="builderSaveMsg" class="muted"></span><button class="btn btn-primary" id="btnSubmitExam">Save exam</button></div></div><aside class="builder-inspector card" id="builderInspector"></aside></div></main></div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script><script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script><script src="js/firebase-init.js"></script><script src="js/common.js"></script><script src="js/teacher-builder.js"></script></body></html>
