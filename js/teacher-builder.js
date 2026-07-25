@@ -437,6 +437,24 @@ document.addEventListener("DOMContentLoaded", function () {
           removeQuestion(part, group, question.id);
           markDirty();
           refresh();
+        },
+        onMoveUp: question => {
+          const position = group.questionIds.indexOf(question.id);
+          if (position <= 0) return;
+          [group.questionIds[position - 1], group.questionIds[position]] =
+            [group.questionIds[position], group.questionIds[position - 1]];
+          syncPartQuestionOrder(part);
+          markDirty();
+          refresh();
+        },
+        onMoveDown: question => {
+          const position = group.questionIds.indexOf(question.id);
+          if (position === -1 || position >= group.questionIds.length - 1) return;
+          [group.questionIds[position], group.questionIds[position + 1]] =
+            [group.questionIds[position + 1], group.questionIds[position]];
+          syncPartQuestionOrder(part);
+          markDirty();
+          refresh();
         }
       });
 
@@ -652,7 +670,11 @@ document.addEventListener("DOMContentLoaded", function () {
               <label class="builder-field-label" style="margin-top:0;">Label / text block (not a question — not scored)</label>
               <div class="rich-editor label-block-editor" data-label-editor="${question.id}"></div>
             </div>
-            <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>`;
+            <div class="row-actions">
+              <button class="btn btn-ghost btn-sm row-move" type="button" data-q-up="${questionIndex}" ${questionIndex === 0 ? "disabled" : ""} title="Move up">&uarr;</button>
+              <button class="btn btn-ghost btn-sm row-move" type="button" data-q-down="${questionIndex}" ${questionIndex === questions.length - 1 ? "disabled" : ""} title="Move down">&darr;</button>
+              <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>
+            </div>`;
           container.appendChild(row);
           return;
         }
@@ -686,7 +708,11 @@ document.addEventListener("DOMContentLoaded", function () {
                 : "Correct answer"}" value="${escapeAttribute(answerValue)}" data-q-ans="${questionIndex}">
             ${question.type === "fill" ? `<p class="muted small answer-help">Example: <code>10 | ten</code> stores both as accepted answers.</p>` : ""}
           </div>
-          <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>`;
+          <div class="row-actions">
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-q-up="${questionIndex}" ${questionIndex === 0 ? "disabled" : ""} title="Move up">&uarr;</button>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-q-down="${questionIndex}" ${questionIndex === questions.length - 1 ? "disabled" : ""} title="Move down">&darr;</button>
+            <button class="btn btn-danger btn-sm" type="button" data-q-del="${questionIndex}">✕</button>
+          </div>`;
         container.appendChild(row);
       });
 
@@ -745,6 +771,14 @@ document.addEventListener("DOMContentLoaded", function () {
           question.answer = event.target.value;
         }
         markDirty();
+      }));
+      container.querySelectorAll("[data-q-up]").forEach(button => button.addEventListener("click", event => {
+        const question = questions[+event.target.dataset.qUp];
+        if (config.onMoveUp) config.onMoveUp(question);
+      }));
+      container.querySelectorAll("[data-q-down]").forEach(button => button.addEventListener("click", event => {
+        const question = questions[+event.target.dataset.qDown];
+        if (config.onMoveDown) config.onMoveDown(question);
       }));
       container.querySelectorAll("[data-q-del]").forEach(button => button.addEventListener("click", event => {
         const question = questions[+event.target.dataset.qDel];

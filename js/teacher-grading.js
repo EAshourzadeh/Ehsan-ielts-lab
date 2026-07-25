@@ -77,6 +77,49 @@ document.addEventListener("DOMContentLoaded", function () {
       return (Math.round(average * 2) / 2).toFixed(1);
     }
 
+    // Real IELTS rounding: an average ending in .25 rounds up to the next half band,
+    // and an average ending in .75 rounds up to the next whole band.
+    function roundToIELTSBand(value) {
+      if (!Number.isFinite(value)) return null;
+      const wholePart = Math.floor(value);
+      const fraction = value - wholePart;
+      if (fraction < 0.25) return wholePart;
+      if (fraction < 0.75) return wholePart + 0.5;
+      return wholePart + 1;
+    }
+
+    // A task's band is the average of its 4 assessment criteria (only once all 4 are scored).
+    function computeTaskBand(criteria) {
+      const values = Object.values(criteria || {}).map(Number);
+      if (values.length < 4 || values.some(value => !Number.isFinite(value))) return null;
+      const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+      return roundToIELTSBand(average);
+    }
+
+    // Task 2 counts twice as much as Task 1 toward the overall Writing band (33% / 67%).
+    function computeWritingBand(task1Band, task2Band) {
+      if (task1Band === null || task2Band === null) return null;
+      const weighted = (Number(task1Band) * 1 + Number(task2Band) * 2) / 3;
+      return roundToIELTSBand(weighted);
+    }
+
+    function criterionValue(result, task, criterion) {
+      return result.writingCriteria && result.writingCriteria[task]
+        ? result.writingCriteria[task][criterion]
+        : null;
+    }
+
+    function criterionSelect(id, result, task, criterion, labelText) {
+      const value = criterionValue(result, task, criterion);
+      return `
+        <label>${labelText}
+          <select class="text-input" data-writing-criterion="${escapeAttribute(id)}" data-task="${task}" data-criterion="${criterion}">
+            <option value="">—</option>
+            ${bandsList.map(band => `<option value="${band}" ${String(value) === band ? "selected" : ""}>${band}</option>`).join("")}
+          </select>
+        </label>`;
+    }
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replace(/&/g, "&amp;")
@@ -367,6 +410,8 @@ document.addEventListener("DOMContentLoaded", function () {
       const readingRaw = result.readingScore ? `${result.readingScore.correct}/${result.readingScore.total}` : "—";
       const recalculated = recalculatedObjectiveResult(result, exam);
       const needsScoreCorrection = objectiveScoresDiffer(result, recalculated);
+      const task1Band = computeTaskBand(result.writingCriteria && result.writingCriteria.task1);
+      const task2Band = computeTaskBand(result.writingCriteria && result.writingCriteria.task2);
 
       detail.innerHTML = `
         <header class="grading-detail-header">
@@ -387,7 +432,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="grading-score-grid">
           <div class="grading-score-card"><span>Listening</span><strong>${escapeHtml(result.listeningBand ?? "—")}</strong><small>${escapeHtml(listeningRaw)} correct</small></div>
           <div class="grading-score-card"><span>Reading</span><strong>${escapeHtml(result.readingBand ?? "—")}</strong><small>${escapeHtml(readingRaw)} correct</small></div>
-          <div class="grading-score-card"><span>Writing</span><strong>${escapeHtml(result.writingBand ?? "—")}</strong><small>Teacher grade</small></div>
+          <div class="grading-score-card"><span>Writing</span><strong>${escapeHtml(result.writingBand ?? "—")}</strong><small>Task 1 &times;1 + Task 2 &times;2</small></div>
           <div class="grading-score-card"><span>Speaking</span><strong>${escapeHtml(result.speakingBand ?? "—")}</strong><small>Teacher grade</small></div>
           <div class="grading-score-card overall"><span>Overall</span><strong>${overall || "—"}</strong><small>${overall ? "Final band" : "Pending"}</small></div>
         </div>
@@ -425,12 +470,25 @@ document.addEventListener("DOMContentLoaded", function () {
             <div><h3>Teacher grades</h3><p class="muted small">Changes remain local until submitted or previewed.</p></div>
           </div>
           <div class="grading-form-grid">
-            <label>Writing band
-              <select class="text-input" data-grade-band="${escapeAttribute(selectedId)}">
-                <option value="">—</option>
-                ${bandsList.map(band => `<option value="${band}" ${String(result.writingBand) === band ? "selected" : ""}>${band}</option>`).join("")}
-              </select>
-            </label>
+            <div class="writing-criteria-block">
+              <div class="writing-criteria-column">
+                <div class="writing-criteria-heading">Task 1 <span class="weight-chip">33%</span></div>
+                ${criterionSelect(selectedId, result, "task1", "taskAchievement", "Task Achievement")}
+                ${criterionSelect(selectedId, result, "task1", "coherenceCohesion", "Coherence and Cohesion")}
+                ${criterionSelect(selectedId, result, "task1", "lexicalResource", "Lexical Resource")}
+                ${criterionSelect(selectedId, result, "task1", "grammaticalRange", "Grammatical Range and Accuracy")}
+                <div class="writing-task-band-chip">Task 1 Band <strong>${task1Band ?? "—"}</strong></div>
+              </div>
+              <div class="writing-criteria-column">
+                <div class="writing-criteria-heading">Task 2 <span class="weight-chip">67%</span></div>
+                ${criterionSelect(selectedId, result, "task2", "taskResponse", "Task Response")}
+                ${criterionSelect(selectedId, result, "task2", "coherenceCohesion", "Coherence and Cohesion")}
+                ${criterionSelect(selectedId, result, "task2", "lexicalResource", "Lexical Resource")}
+                ${criterionSelect(selectedId, result, "task2", "grammaticalRange", "Grammatical Range and Accuracy")}
+                <div class="writing-task-band-chip">Task 2 Band <strong>${task2Band ?? "—"}</strong></div>
+              </div>
+            </div>
+            <div class="writing-overall-band-chip">Overall Writing Band <strong>${result.writingBand ?? "—"}</strong></div>
             <label>Speaking band
               <select class="text-input" data-grade-speaking="${escapeAttribute(selectedId)}">
                 <option value="">—</option>
@@ -459,7 +517,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function bindDetailEvents() {
       const detail = document.getElementById("gradingDetail");
-      const writingSelect = detail.querySelector("[data-grade-band]");
       const speakingSelect = detail.querySelector("[data-grade-speaking]");
       const feedback = detail.querySelector("[data-grade-feedback]");
       const saveButton = detail.querySelector("[data-save-result]");
@@ -475,9 +532,33 @@ document.addEventListener("DOMContentLoaded", function () {
         });
       });
 
-      writingSelect.addEventListener("change", event => {
-        setLocalEdit(event.target.dataset.gradeBand, "writingBand", event.target.value === "" ? null : Number(event.target.value));
-        renderIndex();
+      detail.querySelectorAll("[data-writing-criterion]").forEach(select => {
+        select.addEventListener("change", event => {
+          const id = event.target.dataset.writingCriterion;
+          const task = event.target.dataset.task;
+          const criterion = event.target.dataset.criterion;
+          const current = merged(id);
+          const existing = current.writingCriteria || {};
+          const nextCriteria = {
+            task1: Object.assign({}, existing.task1),
+            task2: Object.assign({}, existing.task2)
+          };
+          nextCriteria[task][criterion] = event.target.value === "" ? null : Number(event.target.value);
+
+          const task1Band = computeTaskBand(nextCriteria.task1);
+          const task2Band = computeTaskBand(nextCriteria.task2);
+          const overallWritingBand = computeWritingBand(task1Band, task2Band);
+
+          localEdits[id] = localEdits[id] || {};
+          localEdits[id].writingCriteria = nextCriteria;
+          localEdits[id].writingTask1Band = task1Band;
+          localEdits[id].writingTask2Band = task2Band;
+          localEdits[id].writingBand = overallWritingBand;
+          hasUnsavedChanges = true;
+
+          renderDetail();
+          renderIndex();
+        });
       });
 
       speakingSelect.addEventListener("change", event => {
@@ -573,6 +654,10 @@ document.addEventListener("DOMContentLoaded", function () {
       const submitted = result.submittedAt ? new Date(result.submittedAt).toLocaleDateString() : "Unknown date";
       const listeningRaw = result.listeningScore ? `${result.listeningScore.correct}/${result.listeningScore.total}` : "—";
       const readingRaw = result.readingScore ? `${result.readingScore.correct}/${result.readingScore.total}` : "—";
+      const criteria = result.writingCriteria || {};
+      const task1 = criteria.task1 || {};
+      const task2 = criteria.task2 || {};
+      const hasWritingBreakdown = result.writingTask1Band != null || result.writingTask2Band != null;
       return `
         <main class="report-page">
           <header class="report-hero">
@@ -590,6 +675,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 <tr><td>Speaking</td><td>Teacher graded</td><td>${escapeHtml(result.speakingBand ?? "Not graded")}</td></tr>
               </tbody>
             </table>
+            ${hasWritingBreakdown ? `
+            <table class="report-table writing-breakdown">
+              <thead><tr><th>Writing criterion</th><th>Task 1 (33%)</th><th>Task 2 (67%)</th></tr></thead>
+              <tbody>
+                <tr><td>Task Achievement / Response</td><td>${escapeHtml(task1.taskAchievement ?? "—")}</td><td>${escapeHtml(task2.taskResponse ?? "—")}</td></tr>
+                <tr><td>Coherence and Cohesion</td><td>${escapeHtml(task1.coherenceCohesion ?? "—")}</td><td>${escapeHtml(task2.coherenceCohesion ?? "—")}</td></tr>
+                <tr><td>Lexical Resource</td><td>${escapeHtml(task1.lexicalResource ?? "—")}</td><td>${escapeHtml(task2.lexicalResource ?? "—")}</td></tr>
+                <tr><td>Grammatical Range and Accuracy</td><td>${escapeHtml(task1.grammaticalRange ?? "—")}</td><td>${escapeHtml(task2.grammaticalRange ?? "—")}</td></tr>
+                <tr><td><strong>Task Band</strong></td><td><strong>${escapeHtml(result.writingTask1Band ?? "—")}</strong></td><td><strong>${escapeHtml(result.writingTask2Band ?? "—")}</strong></td></tr>
+              </tbody>
+            </table>` : ""}
             <div class="overall"><span>Overall Band</span><strong>${escapeHtml(overall)}</strong></div>
             ${result.writingFeedback ? `<section class="feedback"><h2>Teacher feedback</h2><p>${escapeHtml(result.writingFeedback)}</p></section>` : ""}
           </div>
