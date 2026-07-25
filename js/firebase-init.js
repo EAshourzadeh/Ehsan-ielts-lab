@@ -1,4 +1,8 @@
-/* Firebase compat SDK must be loaded before this file. */
+/* =========================================================
+   EHSAN IELTS Mock Test — js/firebase-init.js
+   Loaded on every page BEFORE common.js.
+   ========================================================= */
+
 const firebaseConfig = {
   apiKey: "AIzaSyBUfNmKsUphRr1Kp8fZJYDo7kBgNskQwcg",
   authDomain: "ehsan-learning-suite.firebaseapp.com",
@@ -9,8 +13,6 @@ const firebaseConfig = {
   measurementId: "G-GWR381SKPC"
 };
 
-if (typeof firebase !== "undefined" && !firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const db = typeof firebase !== "undefined" && typeof firebase.firestore === "function" ? firebase.firestore() : null;
-const auth = typeof firebase !== "undefined" && typeof firebase.auth === "function" ? firebase.auth() : null;
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
