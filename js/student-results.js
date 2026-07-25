@@ -1,13 +1,1 @@
-document.addEventListener("DOMContentLoaded", function () {
-  const session = getSession();
-  if (!session || !session.submittedAt) { window.location.href = "student-login.html"; return; }
-
-  const chipsWrap = document.getElementById("prelimScores");
-  chipsWrap.innerHTML = `
-    <div class="score-chip"><div class="band-num">${session.listeningBand}</div><div class="band-label">Listening</div></div>
-    <div class="score-chip"><div class="band-num">${session.readingBand}</div><div class="band-label">Reading</div></div>
-    <div class="score-chip"><div class="band-num">—</div><div class="band-label">Writing (pending)</div></div>`;
-
-  // Session's job is done — clear it so a stray back-navigation can't resubmit or overwrite it.
-  clearSession();
-});
+document.addEventListener("DOMContentLoaded",async()=>{const s=getSession();if(!s?.resultId){location.href="student-login.html";return;}const all=await getResults(),r=all[s.resultId];if(!r){document.getElementById("resultMeta").textContent="Your result was saved, but it is not available on this device.";return;}document.getElementById("resultMeta").textContent=`${r.studentName} · ${r.examName}`;const values=[["Listening",r.listeningBand,`${r.listeningCorrect}/${r.listeningTotal}`],["Reading",r.readingBand,`${r.readingCorrect}/${r.readingTotal}`],["Writing",r.writingBand??"Pending","Teacher graded"],["Speaking",r.speakingBand??"Pending","Teacher graded"]];document.getElementById("bandGrid").innerHTML=values.map(([l,b,n])=>`<div class="band-box"><span>${l}</span><strong>${b}</strong><small>${n}</small></div>`).join("");});
