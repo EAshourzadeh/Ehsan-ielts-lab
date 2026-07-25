@@ -1,1 +1,101 @@
-document.addEventListener("DOMContentLoaded",()=>requireAdminAuth(async()=>{document.getElementById("btnLogout").onclick=logoutAdmin;let exams=await getExams();const grid=document.getElementById("examGrid");render();document.getElementById("btnNewExam").onclick=async()=>{const name=prompt("Exam name","New IELTS Exam");if(!name)return;const exam=normalizeExam({id:uid("exam"),name,status:"draft",listening:[],reading:[],writing:{}});await saveExam(exam);location.href=`teacher-builder.html?exam=${encodeURIComponent(exam.id)}`;};function render(){grid.innerHTML=Object.values(exams).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||""))).map(e=>`<article class="exam-card card"><div class="exam-meta">${escapeHtml(e.status||"draft")} · ${escapeHtml(e.updatedAt?new Date(e.updatedAt).toLocaleDateString():"Not saved")}</div><h3>${escapeHtml(e.name)}</h3><p class="muted small">${(e.listening||[]).length} listening parts · ${(e.reading||[]).length} reading passages</p><div class="toolbar-row"><a class="btn btn-primary btn-sm" href="teacher-builder.html?exam=${encodeURIComponent(e.id)}">Open composer</a><button class="btn btn-sm" data-clone="${e.id}">Duplicate</button><button class="btn btn-sm btn-danger" data-delete="${e.id}">Delete</button></div></article>`).join("");grid.querySelectorAll("[data-clone]").forEach(b=>b.onclick=async()=>{const c=normalizeExam(clone(exams[b.dataset.clone]));c.id=uid("exam");c.name=`${c.name} — Copy`;await saveExam(c);exams[c.id]=c;render();});grid.querySelectorAll("[data-delete]").forEach(b=>b.onclick=async()=>{if(confirm("Delete this exam?")){await deleteExam(b.dataset.delete);delete exams[b.dataset.delete];render();}});}}));
+document.addEventListener("DOMContentLoaded", function () {
+  requireAdminAuth(() => {
+    document.getElementById("btnLogout").addEventListener("click", logoutAdmin);
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function escapeAttribute(value) {
+      return escapeHtml(value).replace(/`/g, "&#096;");
+    }
+
+    function createExamId() {
+      return `exam-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    document.getElementById("btnNewExam").addEventListener("click", async () => {
+      const name = prompt("Name this exam:");
+      if (!name || !name.trim()) return;
+      const id = createExamId();
+      await saveExam({
+        id,
+        name: name.trim(),
+        listening: [],
+        reading: [],
+        writing: { task1Prompt: "", task1Image: "", task2Prompt: "" }
+      });
+      renderExamList();
+    });
+
+    async function duplicateExam(sourceExam, button) {
+      const defaultName = `${sourceExam.name || "Untitled Exam"} (Copy)`;
+      const name = prompt("Name the duplicated exam:", defaultName);
+      if (!name || !name.trim()) return;
+
+      button.disabled = true;
+      const originalLabel = button.textContent;
+      button.textContent = "Duplicating…";
+
+      try {
+        const duplicate = JSON.parse(JSON.stringify(sourceExam));
+        duplicate.id = createExamId();
+        duplicate.name = name.trim();
+        await saveExam(duplicate);
+        await renderExamList();
+      } catch (error) {
+        console.error("Could not duplicate exam", error);
+        alert("The exam could not be duplicated. Please try again.");
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    }
+
+    async function renderExamList() {
+      const wrap = document.getElementById("examList");
+      wrap.innerHTML = `<p class="muted">Loading exams…</p>`;
+      const exams = await getExams();
+      wrap.innerHTML = "";
+
+      Object.values(exams).forEach(exam => {
+        const listeningParts = Array.isArray(exam.listening) ? exam.listening : [];
+        const readingParts = Array.isArray(exam.reading) ? exam.reading : [];
+        const listeningCount = listeningParts.reduce((total, part) => total + (Array.isArray(part.questions) ? part.questions.length : 0), 0);
+        const readingCount = readingParts.reduce((total, part) => total + (Array.isArray(part.questions) ? part.questions.length : 0), 0);
+        const card = document.createElement("div");
+        card.className = "exam-card";
+        card.innerHTML = `
+          <div>
+            <div class="exam-card-name">${escapeHtml(exam.name || "Untitled Exam")}</div>
+            <div class="exam-card-meta">${listeningCount} listening q &middot; ${readingCount} reading q &middot; ${listeningParts.length} audio parts</div>
+          </div>
+          <div class="exam-card-actions">
+            <a class="btn btn-ghost btn-sm" href="teacher-builder.html?exam=${encodeURIComponent(exam.id)}">Edit</a>
+            <button type="button" class="btn btn-ghost btn-sm" data-duplicate="${escapeAttribute(exam.id)}">Duplicate</button>
+            <button type="button" class="btn btn-danger btn-sm" data-del="${escapeAttribute(exam.id)}">Delete</button>
+          </div>`;
+        wrap.appendChild(card);
+      });
+
+      wrap.querySelectorAll("[data-duplicate]").forEach(button => {
+        button.addEventListener("click", () => {
+          const sourceExam = exams[button.dataset.duplicate];
+          if (sourceExam) duplicateExam(sourceExam, button);
+        });
+      });
+
+      wrap.querySelectorAll("[data-del]").forEach(button => button.addEventListener("click", async () => {
+        if (!confirm("Delete this exam permanently?")) return;
+        await deleteExam(button.dataset.del);
+        renderExamList();
+      }));
+    }
+
+    renderExamList();
+  });
+});
