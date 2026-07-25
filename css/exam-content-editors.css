@@ -1,2 +1,518 @@
-/* Builder-specific Quill and IELTS composer refinements. */
-.ql-editor h2,.ql-editor h3{font-family:Lora,Georgia,serif}.ql-editor p{margin:.35rem 0}.ql-editor .semantic-instruction{font-weight:600;color:#42566a}.ql-editor .semantic-emphasis{font-weight:700}.ql-editor .semantic-subheading{font-family:Lora,Georgia,serif;font-size:1.15rem;font-weight:700}.paste-toast{position:fixed;right:1rem;bottom:1rem;background:#132431;color:#fff;padding:.7rem 1rem;border-radius:10px;z-index:100;box-shadow:0 14px 40px rgba(0,0,0,.18)}
+/* Rich question-group authoring and student presentation. Loaded by the builder/runner scripts. */
+.enhanced-builder-card {
+  overflow: visible;
+}
+
+.builder-field-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.builder-help,
+.answer-help {
+  margin: -2px 0 8px;
+  line-height: 1.45;
+}
+
+.builder-help code,
+.answer-help code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.multi-weight-hint {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--color-amber-600, #b97816);
+  font-weight: 700;
+}
+
+.builder-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.label-question-row {
+  background: var(--color-amber-100, #fff3d9);
+  border-radius: var(--radius-sm, 8px);
+  padding: 10px 12px;
+}
+
+.row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.row-move {
+  padding: 4px 8px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.row-move:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.question-groups-wrap {
+  display: grid;
+  gap: 18px;
+  margin: 20px 0 14px;
+}
+
+.question-group-editor-card {
+  padding: 16px;
+  border: 1px solid var(--color-border, #d7dee5);
+  border-radius: var(--radius-md, 12px);
+  background: var(--color-surface-subtle, #f8fafb);
+}
+
+.question-group-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.question-group-editor-head > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.question-range-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--color-teal-100, #e7f1ef);
+  color: var(--color-teal-800, #245b57);
+  font-size: 0.77rem;
+  font-weight: 700;
+}
+
+/* Quill turns the target .rich-editor element itself into .ql-container.
+   Quill's core stylesheet gives that element height: 100%, which can resolve
+   against the whole builder card and make the editor spill over later fields.
+   Explicit editor heights keep every card in normal document flow while the
+   editable area scrolls internally when its content is longer. */
+.rich-editor.ql-container {
+  height: var(--rich-editor-height, 140px) !important;
+  min-height: var(--rich-editor-height, 140px) !important;
+  max-height: var(--rich-editor-height, 140px) !important;
+  margin: 0 0 6px;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+}
+
+.rich-editor.ql-container > .ql-editor {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: auto;
+}
+
+.question-label-editor {
+  --rich-editor-height: 150px;
+}
+
+.compact-rich-editor {
+  --rich-editor-height: 120px;
+}
+
+.passage-rich-editor {
+  --rich-editor-height: 360px;
+}
+
+.rich-editor .ql-editor.ql-blank::before {
+  white-space: pre-line;
+  line-height: 1.55;
+}
+
+.rich-editor .ql-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px auto;
+  border-radius: 8px;
+}
+
+.enhanced-question-row {
+  margin-top: 13px;
+  background: var(--color-surface, #fff);
+}
+
+.exam-question-group {
+  margin: 0 0 24px;
+}
+
+.exam-question-group-label {
+  margin: 0 0 14px;
+  padding: 15px 17px;
+  border-left: 4px solid var(--color-amber-500, #d49425);
+  border-radius: 0 10px 10px 0;
+  background: var(--color-amber-100, #fff3d9);
+}
+
+.exam-question-range {
+  margin-bottom: 7px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.exam-label-block {
+  margin: 4px 0 16px;
+  padding: 2px 0;
+  line-height: 1.68;
+}
+
+.exam-label-block:first-child {
+  margin-top: 0;
+}
+
+.exam-rich-content {
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+}
+
+.exam-rich-content > :first-child {
+  margin-top: 0;
+}
+
+.exam-rich-content > :last-child {
+  margin-bottom: 0;
+}
+
+.exam-rich-content h2,
+.exam-rich-content h3 {
+  margin: 1.1em 0 0.45em;
+}
+
+.exam-rich-content ul,
+.exam-rich-content ol {
+  padding-left: 1.45rem;
+}
+
+.exam-rich-content blockquote {
+  margin: 1rem 0;
+  padding: 0.7rem 1rem;
+  border-left: 4px solid rgba(26, 104, 115, 0.45);
+  background: rgba(26, 104, 115, 0.06);
+}
+
+.exam-rich-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px auto;
+  border-radius: 8px;
+}
+
+.exam-rich-content table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+.exam-rich-content th,
+.exam-rich-content td {
+  padding: 9px 11px;
+  border: 1px solid rgba(42, 53, 72, 0.25);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reading-passage-intro {
+  margin-bottom: 18px;
+  padding: 13px 15px;
+  border-radius: 10px;
+  background: rgba(26, 104, 115, 0.07);
+  font-weight: 600;
+}
+
+.reading-passage-body {
+  line-height: 1.75;
+}
+
+@media (max-width: 720px) {
+  .question-group-editor-card {
+    padding: 13px;
+  }
+
+  .question-group-editor-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .question-group-editor-head .btn {
+    align-self: flex-end;
+  }
+
+  .passage-rich-editor .ql-editor {
+    min-height: 260px;
+  }
+}
+
+
+/* UI refresh integration */
+.question-group-editor-card {
+  box-shadow: var(--shadow-xs, 0 1px 2px rgb(15 23 42 / 5%));
+  transition: border-color var(--duration-fast, 140ms) var(--ease-standard, ease),
+    box-shadow var(--duration-fast, 140ms) var(--ease-standard, ease);
+}
+
+.question-group-editor-card:focus-within {
+  border-color: rgb(46 107 102 / 38%);
+  box-shadow: var(--shadow-sm, 0 2px 8px rgb(15 23 42 / 6%));
+}
+
+.question-group-editor-head strong {
+  color: var(--color-text, #17243a);
+  font-weight: 750;
+}
+
+.exam-question-group-label {
+  box-shadow: inset 0 0 0 1px rgb(212 148 37 / 12%);
+}
+
+/* Structured answer-key authoring ------------------------------------------------ */
+.question-authoring-card {
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--color-border, #d7dee5);
+  border-radius: var(--radius-md, 12px);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.question-authoring-card.has-answer-errors {
+  border-color: var(--color-amber-500, #d49425);
+}
+
+.question-authoring-card.answer-error-focus {
+  border-color: var(--color-danger, #b84a43);
+  box-shadow: 0 0 0 4px rgba(184, 74, 67, 0.14);
+}
+
+.question-authoring-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.question-authoring-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question-authoring-toolbar select {
+  min-width: min(100%, 260px);
+}
+
+.answer-key-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--color-border, #d7dee5);
+  border-radius: 10px;
+  background: var(--color-surface-subtle, #f8fafb);
+}
+
+.answer-key-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.answer-key-panel-head strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.answer-key-panel-head p {
+  margin: 3px 0 0;
+  color: var(--color-muted, #647184);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.multi-weight-pill {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--color-teal-100, #e7f1ef);
+  color: var(--color-teal-800, #245b57);
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.choice-option-editor-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.choice-option-editor-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.choice-option-editor-row .text-input {
+  margin: 0;
+}
+
+.correct-option-toggle {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.correct-option-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-option-letter {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 2px solid var(--color-border, #d7dee5);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  color: var(--color-muted, #647184);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 800;
+  transition: 140ms ease;
+}
+
+.correct-option-toggle input:checked + .choice-option-letter {
+  border-color: var(--color-teal-700, #2e6b66);
+  background: var(--color-teal-700, #2e6b66);
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(46, 107, 102, 0.14);
+}
+
+.correct-option-toggle input:focus-visible + .choice-option-letter {
+  outline: 3px solid rgba(46, 107, 102, 0.22);
+  outline-offset: 2px;
+}
+
+.correct-option-toggle input:disabled + .choice-option-letter {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.choice-option-remove {
+  white-space: nowrap;
+}
+
+.tfng-answer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tfng-answer-choice {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--color-border, #d7dee5);
+  border-radius: 10px;
+  background: var(--color-surface, #fff);
+  cursor: pointer;
+  font-weight: 700;
+  text-align: center;
+  transition: 140ms ease;
+}
+
+.tfng-answer-choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tfng-answer-choice.is-selected,
+.tfng-answer-choice:has(input:checked) {
+  border-color: var(--color-teal-700, #2e6b66);
+  background: var(--color-teal-100, #e7f1ef);
+  color: var(--color-teal-800, #245b57);
+}
+
+.fill-answer-panel .text-input {
+  margin-bottom: 4px;
+}
+
+.answer-key-feedback {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 0.79rem;
+  line-height: 1.45;
+}
+
+.answer-key-feedback.is-complete {
+  background: rgba(46, 107, 102, 0.1);
+  color: var(--color-teal-800, #245b57);
+}
+
+.answer-key-feedback.is-incomplete {
+  background: var(--color-amber-100, #fff3d9);
+  color: var(--color-amber-900, #70480d);
+}
+
+.answer-key-status {
+  font-weight: 800;
+}
+
+.answer-key-feedback ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.q-hint.selection-complete {
+  color: var(--color-teal-700, #2e6b66);
+  font-weight: 700;
+}
+
+.q-hint.limit-reached {
+  color: var(--color-danger, #b84a43);
+  font-weight: 800;
+}
+
+@media (max-width: 700px) {
+  .choice-option-editor-row {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .choice-option-remove {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .tfng-answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .answer-key-panel-head {
+    flex-direction: column;
+  }
+}
