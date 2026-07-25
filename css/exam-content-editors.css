@@ -40,6 +40,24 @@
   padding: 10px 12px;
 }
 
+.row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.row-move {
+  padding: 4px 8px;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.row-move:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .question-groups-wrap {
   display: grid;
   gap: 18px;

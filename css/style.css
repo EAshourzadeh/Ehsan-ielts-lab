@@ -1337,7 +1337,8 @@
     grid-template-columns: 1fr;
   }
 
-  .builder-question-row > .btn-danger {
+  .builder-question-row > .row-actions {
+    flex-direction: row;
     justify-self: end;
   }
 
