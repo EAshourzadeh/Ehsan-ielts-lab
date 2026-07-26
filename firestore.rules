@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isStudent() {
+      return signedIn()
+        && request.auth.token.email.matches('^student-[0-9]{5}@students[.]ehsan[.]app$');
+    }
+    function isTeacher() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/teachers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.active != false;
+    }
+
+    match /teachers/{teacherId} {
+      allow read: if signedIn() && request.auth.uid == teacherId;
+      allow write: if false;
+    }
+
+    match /exams/{examId} {
+      allow read: if true;
+      allow write: if isTeacher();
+    }
+
+    match /students/{studentId} {
+      allow read: if isTeacher() || (signedIn() && request.auth.uid == studentId);
+      allow create, update, delete: if isTeacher();
+    }
+
+    match /results/{resultId} {
+      allow create: if signedIn()
+        && request.resource.data.studentUid == request.auth.uid;
+      allow read: if isTeacher()
+        || (signedIn() && resource.data.studentUid == request.auth.uid);
+      allow update, delete: if isTeacher();
+    }
+  }
+}

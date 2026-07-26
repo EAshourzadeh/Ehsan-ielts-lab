@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Accounts — EHSAN IELTS</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="admin-shell">
+  <aside class="admin-sidebar">
+    <div class="admin-brand">EHSAN<span>IELTS</span></div>
+    <nav class="admin-nav">
+      <a class="admin-nav-btn" href="teacher-dashboard.html">Exams</a>
+      <a class="admin-nav-btn" href="teacher-builder.html">Exam Builder</a>
+      <a class="admin-nav-btn" href="teacher-submissions.html">Submissions</a>
+      <a class="admin-nav-btn" href="teacher-grading.html">Grading</a>
+      <a class="admin-nav-btn active" href="teacher-accounts.html">Student Accounts</a>
+    </nav>
+    <button class="btn sidebar-logout btn-sm" id="btnLogout" style="margin-top:auto;">Log Out</button>
+  </aside>
+  <main class="admin-main">
+    <div class="panel-head"><div><h2>Student Accounts</h2><p class="muted">Create login credentials tied to each student’s real name.</p></div></div>
+    <section class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+      <h3>Create account</h3>
+      <div class="inline-row">
+        <input class="text-input" id="studentRealName" placeholder="Student real name" autocomplete="off">
+        <input class="text-input" id="studentUsername" placeholder="5-digit username" inputmode="numeric" maxlength="5" autocomplete="off">
+        <input class="text-input" id="studentPassword" placeholder="5-character password" maxlength="5" autocomplete="new-password">
+        <button class="btn btn-primary" id="btnCreateStudent">Create</button>
+      </div>
+      <p class="muted small">The password must contain at least one letter and one number. Passwords are stored only by Firebase Authentication, never in Firestore or localStorage.</p>
+      <div id="accountMessage" class="error-msg" role="status"></div>
+    </section>
+    <section><h3>Existing students</h3><div id="studentAccountList" class="exam-list"><p class="muted">Loading…</p></div></section>
+  </main>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-init.js"></script>
+<script src="js/common.js"></script>
+<script src="js/teacher-accounts.js"></script>
+</body>
+</html>

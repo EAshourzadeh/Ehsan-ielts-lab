@@ -13,11 +13,12 @@
   <div class="auth-card">
     <a class="link-back" href="index.html">&larr; Back</a>
     <h2>Student Login</h2>
-    <p class="muted">Enter your name and pick an exam to begin.</p>
-    <input type="text" id="studentNameInput" class="text-input" placeholder="Full name" autocomplete="off">
+    <p class="muted">Use the five-character credentials supplied by your teacher.</p>
+    <input type="text" id="studentUsernameInput" class="text-input" placeholder="5-digit username" inputmode="numeric" maxlength="5" autocomplete="username">
+    <input type="password" id="studentPasswordInput" class="text-input" placeholder="5-character password" maxlength="5" autocomplete="current-password">
     <select id="examSelect" class="text-input"></select>
     <div id="studentLoginError" class="error-msg"></div>
-    <button class="btn btn-primary" id="btnStudentSubmit">Continue</button>
+    <button class="btn btn-primary" id="btnStudentSubmit">Sign in and continue</button>
   </div>
 </div>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
