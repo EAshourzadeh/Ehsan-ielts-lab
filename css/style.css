@@ -723,11 +723,13 @@
     transform: scaleX(1);
   }
 
-  .builder-tab-pane {
+  .builder-tab-pane,
+  .builder-pane {
     display: none;
   }
 
-  .builder-tab-pane.active {
+  .builder-tab-pane.active,
+  .builder-pane.active {
     display: block;
     animation: pane-enter var(--duration-normal) var(--ease-standard) both;
   }
