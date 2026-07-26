@@ -29,17 +29,28 @@ function sampleExam() {
         title: "Part 1 — Library Registration",
         audio: "assets/audio/sample-part1.mp3",
         questions: [
-          { id: "l1", type: "fill", text: "The student's surname is spelled ______.", answer: "Harrington" },
-          { id: "l2", type: "fill", text: "The library card fee is $______.", answer: "15" },
+          { id: "l1", type: "fill", text: "", answer: "Harrington" },
+          { id: "l2", type: "fill", text: "", answer: "15" },
           { id: "l3", type: "mc", text: "The library closes at:", options: ["8pm", "9pm", "10pm"], answer: "9pm" }
-        ]
+        ],
+        questionGroups: [{
+          id: "l1g1",
+          label: "<p>Questions 1 and 2</p><p>Complete the notes below. Write <strong>ONE WORD AND/OR A NUMBER</strong> for each answer.</p>",
+          questionIds: ["l1", "l2", "l3"],
+          contentBlocks: [{
+            id: "l1block1",
+            type: "notes",
+            title: "Library Registration",
+            sections: [{ heading: "", rows: ["The student's surname is spelled {{q:l1}}", "The library card fee is $ {{q:l2}}"] }]
+          }]
+        }]
       },
       {
         title: "Part 2 — Campus Tour",
         audio: "assets/audio/sample-part2.mp3",
         questions: [
           { id: "l4", type: "multi", text: "Which TWO facilities are mentioned in the tour? (choose two)", options: ["Science building", "Swimming pool", "Cafeteria", "Bookstore"], answer: ["Science building", "Cafeteria"] },
-          { id: "l5", type: "fill", text: "Tours run every ______ minutes.", answer: "45" }
+          { id: "l5", type: "fill", text: 'Tours run every <span class="ielts-answer-slot" data-slot-id="l5-slot" data-slot-size="short"></span> minutes.', answer: "45" }
         ]
       },
       {
@@ -170,6 +181,175 @@ function scoreSection(parts, answers) {
     }
   }));
   return { correct, total };
+}
+
+/* =========================================================
+   Rich content: inline answer blanks + IELTS content blocks
+   Shared between the Exam Builder (authoring/preview) and the
+   student exam runner (real, scored rendering).
+   ========================================================= */
+
+const TFNG_OPTIONS = ["True", "False", "Not Given"];
+const YNNG_OPTIONS = ["Yes", "No", "Not Given"];
+
+function stripHtml(value) {
+  const node = document.createElement("div");
+  node.innerHTML = String(value || "");
+  return (node.textContent || "").trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
+function generateSlotId() {
+  return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/* Registers a custom Quill embed so a blank can live inline inside rich text —
+   e.g. "The cost is £ [blank] including one disk." Call once, after Quill loads,
+   before creating any Quill editor that should support inline blanks. */
+function registerAnswerSlotBlot() {
+  if (typeof Quill === "undefined") return;
+  if (Quill.imports && Quill.imports["formats/answerSlot"]) return; // already registered
+  const Embed = Quill.import("blots/embed");
+  class AnswerSlotBlot extends Embed {
+    static create(value = {}) {
+      const node = super.create();
+      node.setAttribute("contenteditable", "false");
+      node.dataset.slotId = value.id || generateSlotId();
+      node.dataset.slotSize = value.size || "medium";
+      node.textContent = "▭▭▭";
+      return node;
+    }
+    static value(node) {
+      return { id: node.dataset.slotId, size: node.dataset.slotSize };
+    }
+  }
+  AnswerSlotBlot.blotName = "answerSlot";
+  AnswerSlotBlot.tagName = "SPAN";
+  AnswerSlotBlot.className = "ielts-answer-slot";
+  Quill.register(AnswerSlotBlot, true);
+}
+
+/* Renders one real inline answer input. `value` is whatever the student has
+   typed so far (or "" in the builder's preview / not started yet). */
+function slotInputHtml(question, slotId, size, value, disabled) {
+  const safeValue = String(value || "").replace(/"/g, "&quot;");
+  return `<input type="text" id="qblock-${question.id}" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}" value="${safeValue}" autocomplete="off" ${disabled ? "disabled" : ""}>`;
+}
+
+/* Converts every <span class="ielts-answer-slot"> embedded in a question's rich
+   text into a real input tied to that question. A legacy fill question with no
+   embedded slot is left untouched — the caller adds a fallback input instead. */
+function hydrateInlineSlots(html, question, value, disabled) {
+  const wrap = document.createElement("div");
+  wrap.innerHTML = String(html || "");
+  wrap.querySelectorAll(".ielts-answer-slot").forEach((slot, index) => {
+    const slotId = slot.dataset.slotId || `${question.id}-slot-${index + 1}`;
+    const size = slot.dataset.slotSize || "medium";
+    slot.outerHTML = slotInputHtml(question, slotId, size, value, disabled);
+  });
+  return wrap.innerHTML;
+}
+
+function hasInlineSlot(html) {
+  return /class="ielts-answer-slot"/.test(String(html || ""));
+}
+
+/* ---------- IELTS content blocks: Notes card / Table / Option bank / Flow chart / Instruction key ----------
+   These are layout wrappers a teacher can add to a question group, matching real
+   Cambridge test formats. A block's rows/cells/steps are plain text and may embed
+   {{q:<questionId>}} tokens — each token renders as a real inline answer input
+   tied to that question (the same underlying scored question as everywhere else;
+   the block just controls where and how it's displayed). */
+
+function renderTemplateText(text, answersById, disabled) {
+  const safe = escapeHtml(String(text || ""));
+  return safe.replace(/\{\{q:([a-zA-Z0-9_-]+)\}\}/g, (match, questionId) => {
+    const value = answersById ? answersById[questionId] : "";
+    return slotInputHtml({ id: questionId }, `${questionId}-inline`, "medium", value, disabled);
+  });
+}
+
+function renderInstructionKey(block) {
+  const rows = block.preset === "ynng"
+    ? [["YES", "agrees with the writer's claims"], ["NO", "contradicts the writer's claims"], ["NOT GIVEN", "there is no information about this"]]
+    : [["TRUE", "agrees with the information"], ["FALSE", "contradicts the information"], ["NOT GIVEN", "there is no information on this"]];
+  return `<section class="ielts-block instruction-key">${rows.map(([label, meaning]) => `<p><strong>${label}</strong><span>${meaning}</span></p>`).join("")}</section>`;
+}
+
+function renderContentBlock(block, answersById, disabled) {
+  if (!block) return "";
+  if (block.type === "notes") {
+    return `<section class="ielts-block notes-card">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      ${(block.sections || []).map(section => `
+        <div class="notes-section">
+          ${section.heading ? `<h4>${escapeHtml(section.heading)}</h4>` : ""}
+          <ul>${(section.rows || []).map(row => `<li>${renderTemplateText(row, answersById, disabled)}</li>`).join("")}</ul>
+        </div>`).join("")}
+    </section>`;
+  }
+  if (block.type === "table") {
+    return `<section class="ielts-block table-block">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      <div class="table-scroll"><table><tbody>
+        ${(block.rows || []).map((row, rowIndex) => `<tr>${(row || []).map(cell => {
+          const isHeader = rowIndex === 0 && block.headerRow;
+          const tag = isHeader ? "th" : "td";
+          return `<${tag}>${renderTemplateText(cell, answersById, disabled)}</${tag}>`;
+        }).join("")}</tr>`).join("")}
+      </tbody></table></div>
+    </section>`;
+  }
+  if (block.type === "optionBank") {
+    return `<section class="ielts-block option-bank">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      <div class="option-bank-grid">${(block.options || []).map((option, index) => `<p><strong>${String.fromCharCode(65 + index)}</strong><span>${escapeHtml(option)}</span></p>`).join("")}</div>
+    </section>`;
+  }
+  if (block.type === "flow") {
+    const steps = block.steps || [];
+    return `<section class="ielts-block flow-block">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      <div class="flow-list">${steps.map((step, index) => `<div class="flow-step">${renderTemplateText(step, answersById, disabled)}</div>${index < steps.length - 1 ? `<div class="flow-arrow" aria-hidden="true">&darr;</div>` : ""}`).join("")}</div>
+    </section>`;
+  }
+  if (block.type === "instructionKey") return renderInstructionKey(block);
+  return "";
+}
+
+/* Finds every {{q:<id>}} token across a content block's text fields, in reading
+   order. Used to keep a block's embedded blanks in sync with real backing
+   questions as a teacher edits the block in the builder. */
+function contentBlockTokenIds(block) {
+  const ids = [];
+  const scan = text => {
+    String(text || "").replace(/\{\{q:([a-zA-Z0-9_-]+)\}\}/g, (match, id) => { ids.push(id); return match; });
+  };
+  if (!block) return ids;
+  if (block.type === "notes") (block.sections || []).forEach(section => (section.rows || []).forEach(scan));
+  if (block.type === "table") (block.rows || []).forEach(row => (row || []).forEach(scan));
+  if (block.type === "flow") (block.steps || []).forEach(scan);
+  return ids;
+}
+
+// A question referenced inside a content block (e.g. a Notes card blank) is
+// displayed there, not as a second, separate standalone question card/block.
+function contentBlocksConsumedIds(contentBlocks) {
+  const ids = new Set();
+  (contentBlocks || []).forEach(block => contentBlockTokenIds(block).forEach(id => ids.add(id)));
+  return ids;
 }
 
 /* ---------- Generate final formatted result report (teacher, after grading) ---------- */

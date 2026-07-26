@@ -116,11 +116,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     const groups = [];
 
     (Array.isArray(part.questionGroups) ? part.questionGroups : []).forEach(group => {
+      const consumedByBlocks = contentBlocksConsumedIds(group.contentBlocks);
       const entries = (group.questionIds || [])
         .map(id => byId.get(id))
-        .filter(entry => entry && !assigned.has(entry.question.id));
+        .filter(entry => entry && !assigned.has(entry.question.id) && !consumedByBlocks.has(entry.question.id));
       entries.forEach(entry => assigned.add(entry.question.id));
-      groups.push({ label: group.label || "", entries });
+      consumedByBlocks.forEach(id => assigned.add(id)); // still numbered/scored, just not rendered standalone
+      groups.push({ label: group.label || "", contentBlocks: group.contentBlocks || [], entries });
     });
 
     const unassigned = questions
@@ -128,15 +130,16 @@ document.addEventListener("DOMContentLoaded", async function () {
       .filter(entry => !assigned.has(entry.question.id));
 
     if (!groups.length) {
-      groups.push({ label: part.questionLabel || part.instructions || "", entries: unassigned });
+      groups.push({ label: part.questionLabel || part.instructions || "", contentBlocks: [], entries: unassigned });
     } else if (unassigned.length) {
       groups[groups.length - 1].entries.push(...unassigned);
     }
 
     return groups
-      .filter(group => group.entries.length || hasRichContent(group.label))
+      .filter(group => group.entries.length || hasRichContent(group.label) || (group.contentBlocks || []).length)
       .map(group => ({
         label: group.label,
+        contentBlocks: group.contentBlocks || [],
         entries: group.entries.map(entry => {
           const weight = questionWeight(entry.question);
           const start = sectionQuestionNumber(partIndex, entry.questionIndex);
@@ -178,6 +181,14 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (!pane || !part) return;
 
     const answers = currentAnswers();
+
+    // Sweep every inline answer input in the pane once — this covers both a
+    // standalone question with an embedded blank and a content-block blank,
+    // neither of which necessarily sits inside a "qblock-<id>" element.
+    pane.querySelectorAll(".ielts-inline-answer").forEach(input => {
+      if (input.dataset.questionId) answers[input.dataset.questionId] = input.value;
+    });
+
     (part.questions || []).forEach(question => {
       const block = document.getElementById("qblock-" + question.id);
       if (!block) return;
@@ -318,6 +329,14 @@ document.addEventListener("DOMContentLoaded", async function () {
           ${hasRichContent(group.label) ? `<div class="exam-rich-content">${group.label}</div>` : ""}`;
         section.appendChild(label);
       }
+      if ((group.contentBlocks || []).length) {
+        const answersById = currentAnswers();
+        group.contentBlocks.forEach(block => {
+          const wrap = document.createElement("div");
+          wrap.innerHTML = renderContentBlock(block, answersById, false);
+          if (wrap.firstElementChild) section.appendChild(wrap.firstElementChild);
+        });
+      }
       group.entries.forEach(entry => section.appendChild(renderQuestionBlock(entry.question, entry.number, entry.endNumber)));
       qPane.appendChild(section);
     });
@@ -408,7 +427,9 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (question.type === "multi" && JSON.stringify(savedMultiAnswers) !== JSON.stringify(answers[question.id] || [])) {
       answers[question.id] = savedMultiAnswers;
     }
-    let inner = `<div><span class="q-num">${numberLabel}.</span>${question.text || ""}${question.type === "multi" ? `<span class="q-hint" data-multi-hint="${escapeAttribute(question.id)}">(select exactly ${multiLimit}; ${savedMultiAnswers.length} selected)</span>` : ""}</div>`;
+    const stemHasInlineSlot = question.type === "fill" && hasInlineSlot(question.text);
+    const stemHtml = stemHasInlineSlot ? hydrateInlineSlots(question.text, question, answers[question.id] || "", false) : (question.text || "");
+    let inner = `<div><span class="q-num">${numberLabel}.</span>${stemHtml}${question.type === "multi" ? `<span class="q-hint" data-multi-hint="${escapeAttribute(question.id)}">(select exactly ${multiLimit}; ${savedMultiAnswers.length} selected)</span>` : ""}</div>`;
 
     if (question.type === "mc" || question.type === "tfng") {
       const selected = answers[question.id];
@@ -426,7 +447,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         inner += `<div class="q-option multi-opt ${isSelected}" data-qid="${escapeAttribute(question.id)}" data-val="${escapeAttribute(option)}" data-multi="1" data-multi-limit="${multiLimit}"><span class="box"></span>${option}</div>`;
       });
       inner += `</div>`;
-    } else if (question.type === "fill") {
+    } else if (question.type === "fill" && !stemHasInlineSlot) {
       const value = answers[question.id] || "";
       inner += `<input type="text" class="q-fill-input" data-qid="${escapeAttribute(question.id)}" value="${escapeAttribute(value)}" placeholder="Your answer" autocomplete="off">`;
     }
@@ -482,8 +503,14 @@ document.addEventListener("DOMContentLoaded", async function () {
   });
 
   document.getElementById("runnerQuestionsPane").addEventListener("input", event => {
-    if (!event.target.classList.contains("q-fill-input")) return;
-    currentAnswers()[event.target.dataset.qid] = event.target.value;
+    const target = event.target;
+    if (target.classList.contains("q-fill-input")) {
+      currentAnswers()[target.dataset.qid] = target.value;
+    } else if (target.classList.contains("ielts-inline-answer")) {
+      currentAnswers()[target.dataset.questionId] = target.value;
+    } else {
+      return;
+    }
     saveSession(session);
     updateNavBubbles();
   });
@@ -504,7 +531,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       bubble.className = "nav-bubble" + (hasAnswer ? " answered" : "") + (weight > 1 ? " nav-bubble-wide" : "");
       bubble.textContent = endNumber !== startNumber ? `${startNumber}-${endNumber}` : startNumber;
       bubble.title = "Jump to question " + (endNumber !== startNumber ? `${startNumber} and ${endNumber}` : startNumber);
-      bubble.addEventListener("click", () => document.getElementById("qblock-" + question.id).scrollIntoView({ behavior: "smooth", block: "center" }));
+      bubble.addEventListener("click", () => document.getElementById("qblock-" + question.id)?.scrollIntoView({ behavior: "smooth", block: "center" }));
       wrap.appendChild(bubble);
     });
   }

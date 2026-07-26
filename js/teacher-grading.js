@@ -353,7 +353,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <tr>
               <td class="answer-number">${numberLabel}</td>
               <td>
-                <div class="answer-question">${escapeHtml(question.text || `Question ${numberLabel}`)}</div>
+                <div class="answer-question">${escapeHtml(stripHtml(question.text) || `Question ${numberLabel}`)}</div>
                 <div class="answer-part-label">${escapeHtml(part.title || `${title} ${partIndex + 1}`)}</div>
               </td>
               <td class="answer-value">${displayAnswer(given)}</td>
