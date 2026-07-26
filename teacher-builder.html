@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Exam Builder — EHSAN IELTS Mock Test</title>
+<title>Question Composer — EHSAN IELTS Mock Test</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/exam-content-editors.css">
 <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.bubble.css" rel="stylesheet">
 </head>
 <body>
 <div class="admin-shell">
@@ -21,38 +23,53 @@
     </nav>
     <button class="btn sidebar-logout btn-sm" id="btnLogout" style="margin-top:auto;">Log Out</button>
   </aside>
+
   <main class="admin-main">
     <div class="panel-head">
-      <h2>Exam Builder</h2>
-      <select id="builderExamSelect" class="text-input" style="max-width:260px;"></select>
+      <h2>Question Composer</h2>
+      <div class="toolbar-row">
+        <select id="builderExamSelect" class="text-input" style="max-width:220px;"></select>
+        <input type="text" id="examName" class="text-input" placeholder="Exam name" style="max-width:260px;">
+      </div>
     </div>
+
     <div class="builder-tabs">
-      <button class="builder-tab active" data-btab="btabListening">Listening</button>
-      <button class="builder-tab" data-btab="btabReading">Reading</button>
-      <button class="builder-tab" data-btab="btabWriting">Writing</button>
+      <button class="builder-tab active" data-section="listening">Listening</button>
+      <button class="builder-tab" data-section="reading">Reading</button>
+      <button class="builder-tab" data-section="writing">Writing</button>
     </div>
-    <div class="builder-tab-pane active" id="btabListening">
-      <p class="muted small">Add up to 4 parts. Each part has one audio file and its own questions.</p>
-      <div id="listeningPartsList"></div>
-      <button class="btn btn-ghost btn-sm" id="btnAddListeningPart">+ Add Listening Part</button>
-    </div>
-    <div class="builder-tab-pane" id="btabReading">
-      <p class="muted small">Add up to 3 passages. Each passage has its own passage text and questions.</p>
-      <div id="readingPassagesList"></div>
-      <button class="btn btn-ghost btn-sm" id="btnAddReadingPassage">+ Add Reading Passage</button>
-    </div>
-    <div class="builder-tab-pane" id="btabWriting">
-      <div class="field-block">
-        <label>Task 1 Prompt (report/letter)</label>
-        <div id="writingTask1Prompt" class="rich-editor"></div>
-        <label>Task 1 Image URL (optional — chart/diagram)</label>
-        <input type="text" id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png">
+
+    <div class="composer-layout">
+      <div id="builderRoot">
+        <div class="builder-pane active" id="pane-listening">
+          <p class="muted small">Add up to 4 parts. Each part has one audio file, question groups, and optional Notes/Table/Option bank/Flow chart blocks.</p>
+          <div id="listeningPartsList"></div>
+          <button class="btn btn-ghost btn-sm" id="btnAddListeningPart">+ Add Listening Part</button>
+        </div>
+
+        <div class="builder-pane" id="pane-reading">
+          <p class="muted small">Add up to 3 passages. Each passage has an intro/timing note, passage text, question groups, and optional content blocks.</p>
+          <div id="readingPartsList"></div>
+          <button class="btn btn-ghost btn-sm" id="btnAddReadingPassage">+ Add Reading Passage</button>
+        </div>
+
+        <div class="builder-pane" id="pane-writing">
+          <div class="field-block">
+            <label class="builder-field-label">Task 1 Prompt (report/letter)</label>
+            <div id="writingTask1Prompt" class="rich-editor"></div>
+            <label class="builder-field-label">Task 1 Image URL (optional — chart/diagram)</label>
+            <input type="text" id="writingTask1Image" class="text-input" placeholder="assets/images/task1-chart.png">
+          </div>
+          <div class="field-block">
+            <label class="builder-field-label">Task 2 Prompt (essay)</label>
+            <div id="writingTask2Prompt" class="rich-editor"></div>
+          </div>
+        </div>
       </div>
-      <div class="field-block">
-        <label>Task 2 Prompt (essay)</label>
-        <div id="writingTask2Prompt" class="rich-editor"></div>
-      </div>
+
+      <aside id="builderInspector" class="composer-inspector"></aside>
     </div>
+
     <div class="submit-bar">
       <button class="btn btn-primary" id="btnSubmitExam">Submit Exam</button>
       <span id="builderSaveMsg" class="success-msg"></span>
