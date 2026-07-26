@@ -13,7 +13,14 @@ document.addEventListener("DOMContentLoaded", function () {
     btn.disabled = true; btn.textContent = "Signing in...";
 
     auth.signInWithEmailAndPassword(email, pass)
-      .then(() => { window.location.href = "teacher-dashboard.html"; })
+      .then(async credential => {
+        const teacherRecord = await db.collection("teachers").doc(credential.user.uid).get();
+        if (!teacherRecord.exists || teacherRecord.data().active === false) {
+          await auth.signOut();
+          throw { code: "auth/not-a-teacher" };
+        }
+        window.location.href = "teacher-dashboard.html";
+      })
       .catch((err) => {
         btn.disabled = false; btn.textContent = "Sign In";
         errBox.textContent = friendlyAuthError(err);
@@ -27,6 +34,7 @@ document.addEventListener("DOMContentLoaded", function () {
       case "auth/wrong-password":
       case "auth/invalid-credential": return "Incorrect email or password.";
       case "auth/too-many-requests": return "Too many attempts — please wait a moment and try again.";
+      case "auth/not-a-teacher": return "This account is not registered as an active teacher.";
       default: return "Sign-in failed: " + err.message;
     }
   }

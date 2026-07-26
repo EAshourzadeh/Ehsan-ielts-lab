@@ -91,6 +91,7 @@ function sampleExam() {
 async function getExams() {
   const snap = await db.collection("exams").get();
   if (snap.empty) {
+    if (!auth.currentUser || isStudentAccount(auth.currentUser)) return {};
     const sample = sampleExam();
     await db.collection("exams").doc(sample.id).set(sample);
     return { [sample.id]: sample };
@@ -129,21 +130,72 @@ function getSession() { return JSON.parse(sessionStorage.getItem(SS_SESSION) || 
 function saveSession(s) { sessionStorage.setItem(SS_SESSION, JSON.stringify(s)); }
 function clearSession() { sessionStorage.removeItem(SS_SESSION); }
 
+function studentEmail(username) {
+  return `student-${String(username || "").trim()}@students.ehsan.app`;
+}
+function studentFirebasePassword(code) {
+  return `${String(code || "")}#IELTS`;
+}
+function isStudentAccount(user) {
+  return Boolean(user && /@students\.ehsan\.app$/i.test(user.email || ""));
+}
+function validStudentUsername(value) { return /^\d{5}$/.test(String(value || "")); }
+function validStudentPassword(value) {
+  const text = String(value || "");
+  return text.length === 5 && /[a-z]/i.test(text) && /\d/.test(text);
+}
+
 /* ---------- Admin auth guard ----------
    Call at top of every teacher-*.html page (except teacher-login.html).
    Runs onReady(user) once Firebase confirms the signed-in teacher;
    redirects to login if nobody is signed in. */
 function requireAdminAuth(onReady) {
-  auth.onAuthStateChanged(user => {
+  auth.onAuthStateChanged(async user => {
     if (!user) {
       window.location.href = "teacher-login.html";
-    } else if (typeof onReady === "function") {
-      onReady(user);
+    } else if (isStudentAccount(user)) {
+      auth.signOut().finally(() => { window.location.href = "teacher-login.html"; });
+    } else {
+      try {
+        const teacherRecord = await db.collection("teachers").doc(user.uid).get();
+        if (!teacherRecord.exists || teacherRecord.data().active === false) {
+          await auth.signOut();
+          window.location.href = "teacher-login.html?unauthorized=1";
+        } else if (typeof onReady === "function") {
+          onReady(user);
+        }
+      } catch (error) {
+        console.error("Teacher authorization check failed", error);
+        window.location.href = "teacher-login.html?unauthorized=1";
+      }
     }
   });
 }
 function logoutAdmin() {
   auth.signOut().then(() => { window.location.href = "index.html"; });
+}
+
+function createExamGuard() {
+  let released = false;
+  history.pushState({ examGuard: true }, "", location.href);
+  const onPopState = () => {
+    if (released) return;
+    history.pushState({ examGuard: true }, "", location.href);
+  };
+  const onBeforeUnload = event => {
+    if (released) return;
+    event.preventDefault();
+    event.returnValue = "";
+  };
+  window.addEventListener("popstate", onPopState);
+  window.addEventListener("beforeunload", onBeforeUnload);
+  return {
+    release() {
+      released = true;
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    }
+  };
 }
 
 /* ---------- Scoring ---------- */
@@ -153,6 +205,9 @@ function logoutAdmin() {
    correct answers (defaulting to 2, matching real IELTS convention). ---------- */
 function questionScoreWeight(question) {
   if (!question || question.type === "label") return 0;
+  if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) {
+    return question.blankAnswers.length;
+  }
   if (question.type === "multi") {
     const count = Array.isArray(question.answer) ? question.answer.length : 0;
     return count > 0 ? count : 2;
@@ -171,6 +226,13 @@ function scoreSection(parts, answers) {
       const key = Array.isArray(question.answer) ? question.answer : [];
       const matched = given.filter(value => key.includes(value)).length;
       correct += Math.min(matched, weight);
+    } else if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) {
+      const givenValues = Array.isArray(answers[question.id]) ? answers[question.id] : [answers[question.id]];
+      question.blankAnswers.forEach((answerKey, index) => {
+        const given = (givenValues[index] || "").toString().trim().toLowerCase();
+        const accepted = Array.isArray(answerKey) ? answerKey : [answerKey];
+        if (given && accepted.some(key => given === (key || "").toString().trim().toLowerCase())) correct += 1;
+      });
     } else {
       const given = (answers[question.id] || "").toString().trim().toLowerCase();
       // question.answer may be a single string OR an array of accepted alternatives
@@ -243,9 +305,10 @@ function registerAnswerSlotBlot() {
 
 /* Renders one real inline answer input. `value` is whatever the student has
    typed so far (or "" in the builder's preview / not started yet). */
-function slotInputHtml(question, slotId, size, value, disabled) {
+function slotInputHtml(question, slotId, size, value, disabled, blankIndex) {
   const safeValue = String(value || "").replace(/"/g, "&quot;");
-  return `<input type="text" id="qblock-${question.id}" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}" value="${safeValue}" autocomplete="off" ${disabled ? "disabled" : ""}>`;
+  const indexAttribute = Number.isInteger(blankIndex) ? ` data-blank-index="${blankIndex}"` : "";
+  return `<input type="text" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}"${indexAttribute} value="${safeValue}" autocomplete="off" ${disabled ? "disabled" : ""}>`;
 }
 
 /* Converts every <span class="ielts-answer-slot"> embedded in a question's rich
@@ -257,7 +320,8 @@ function hydrateInlineSlots(html, question, value, disabled) {
   wrap.querySelectorAll(".ielts-answer-slot").forEach((slot, index) => {
     const slotId = slot.dataset.slotId || `${question.id}-slot-${index + 1}`;
     const size = slot.dataset.slotSize || "medium";
-    slot.outerHTML = slotInputHtml(question, slotId, size, value, disabled);
+    const slotValue = Array.isArray(value) ? (value[index] || "") : (index === 0 ? value : "");
+    slot.outerHTML = slotInputHtml(question, slotId, size, slotValue, disabled, index);
   });
   return wrap.innerHTML;
 }

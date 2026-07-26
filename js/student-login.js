@@ -1,34 +1,69 @@
 document.addEventListener("DOMContentLoaded", init);
-window.addEventListener("pageshow", init); // also fires on back/forward-cache restores, so the name field can't reappear pre-filled
 
 async function init() {
-  const nameInput = document.getElementById("studentNameInput");
-  nameInput.value = ""; // always start blank, per-student
+  clearSession();
+  const usernameInput = document.getElementById("studentUsernameInput");
+  const passwordInput = document.getElementById("studentPasswordInput");
+  const select = document.getElementById("examSelect");
+  const button = document.getElementById("btnStudentSubmit");
+  const errorBox = document.getElementById("studentLoginError");
 
-  const sel = document.getElementById("examSelect");
-  sel.innerHTML = `<option>Loading exams…</option>`;
-  const exams = await getExams();
-  sel.innerHTML = "";
-  Object.values(exams).forEach(ex => {
-    const opt = document.createElement("option");
-    opt.value = ex.id; opt.textContent = ex.name;
-    sel.appendChild(opt);
-  });
+  select.innerHTML = `<option>Loading exams…</option>`;
+  let exams = {};
+  try {
+    exams = await getExams();
+    if (!Object.keys(exams).length) throw new Error("No exams are currently available.");
+    select.innerHTML = Object.values(exams)
+      .map(exam => `<option value="${escapeHtml(exam.id)}">${escapeHtml(exam.name)}</option>`)
+      .join("");
+  } catch (error) {
+    errorBox.textContent = "Could not load the available exams. Please try again.";
+    button.disabled = true;
+  }
 
-  const btn = document.getElementById("btnStudentSubmit");
-  const errBox = document.getElementById("studentLoginError");
-  btn.onclick = () => {
-    const name = nameInput.value.trim();
-    const examId = sel.value;
-    if (!name) { errBox.textContent = "Please enter your name."; return; }
-    const exam = exams[examId];
-    saveSession({
-      studentName: name, examId, examName: exam.name,
-      listeningAnswers: {}, readingAnswers: {},
-      writingTask1: "", writingTask2: "",
-      listeningScore: null, readingScore: null,
-      submittedAt: null
-    });
-    window.location.href = "student-intro.html";
-  };
+  async function submit() {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (!validStudentUsername(username) || !validStudentPassword(password)) {
+      errorBox.textContent = "Enter your five-digit username and five-character password.";
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Signing in…";
+    errorBox.textContent = "";
+    try {
+      const credential = await auth.signInWithEmailAndPassword(studentEmail(username), studentFirebasePassword(password));
+      const profileSnapshot = await db.collection("students").doc(credential.user.uid).get();
+      const profile = profileSnapshot.exists ? profileSnapshot.data() : null;
+      if (!profile || profile.username !== username || profile.active === false) {
+        await auth.signOut();
+        throw new Error(profile && profile.active === false ? "This account is disabled. Ask your teacher for help." : "Student profile not found.");
+      }
+      const exam = exams[select.value];
+      saveSession({
+        studentUid: credential.user.uid,
+        studentUsername: username,
+        studentName: profile.realName,
+        examId: exam.id,
+        examName: exam.name,
+        listeningAnswers: {},
+        readingAnswers: {},
+        writingTask1: "",
+        writingTask2: "",
+        listeningScore: null,
+        readingScore: null,
+        submittedAt: null
+      });
+      window.location.href = "student-intro.html";
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Sign in and continue";
+      errorBox.textContent = error.code === "auth/invalid-credential"
+        ? "Incorrect username or password."
+        : (error.message || "Sign-in failed.");
+    }
+  }
+
+  button.addEventListener("click", submit);
+  passwordInput.addEventListener("keydown", event => { if (event.key === "Enter") submit(); });
 }

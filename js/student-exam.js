@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   const session = getSession();
   if (!session) { window.location.href = "student-login.html"; return; }
+  const examGuard = createExamGuard();
 
   const exams = await getExams();
   const exam = exams[session.examId];
@@ -85,6 +86,7 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function questionWeight(question) {
     if (!question || question.type === "label") return 0;
+    if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) return question.blankAnswers.length;
     if (question.type === "multi") {
       const count = Array.isArray(question.answer) ? question.answer.length : 0;
       return count > 0 ? count : 2;
@@ -186,7 +188,14 @@ document.addEventListener("DOMContentLoaded", async function () {
     // standalone question with an embedded blank and a content-block blank,
     // neither of which necessarily sits inside a "qblock-<id>" element.
     pane.querySelectorAll(".ielts-inline-answer").forEach(input => {
-      if (input.dataset.questionId) answers[input.dataset.questionId] = input.value;
+      if (!input.dataset.questionId) return;
+      if (input.dataset.blankIndex !== undefined) {
+        const values = Array.isArray(answers[input.dataset.questionId]) ? answers[input.dataset.questionId] : [];
+        values[Number(input.dataset.blankIndex)] = input.value;
+        answers[input.dataset.questionId] = values;
+      } else {
+        answers[input.dataset.questionId] = input.value;
+      }
     });
 
     (part.questions || []).forEach(question => {
@@ -419,7 +428,9 @@ document.addEventListener("DOMContentLoaded", async function () {
     block.className = "question-block";
     block.id = "qblock-" + question.id;
 
-    const numberLabel = (endNumber && endNumber !== questionNumber) ? `${questionNumber} and ${endNumber}` : questionNumber;
+    const numberLabel = (endNumber && endNumber !== questionNumber)
+      ? (endNumber === questionNumber + 1 ? `${questionNumber} and ${endNumber}` : `${questionNumber}–${endNumber}`)
+      : questionNumber;
     const multiLimit = question.type === "multi" ? questionWeight(question) : 0;
     const savedMultiAnswers = question.type === "multi" && Array.isArray(answers[question.id])
       ? answers[question.id].filter(value => (question.options || []).includes(value)).slice(0, multiLimit)
@@ -507,7 +518,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     if (target.classList.contains("q-fill-input")) {
       currentAnswers()[target.dataset.qid] = target.value;
     } else if (target.classList.contains("ielts-inline-answer")) {
-      currentAnswers()[target.dataset.questionId] = target.value;
+      if (target.dataset.blankIndex !== undefined) {
+        const values = Array.isArray(currentAnswers()[target.dataset.questionId]) ? currentAnswers()[target.dataset.questionId] : [];
+        values[Number(target.dataset.blankIndex)] = target.value;
+        currentAnswers()[target.dataset.questionId] = values;
+      } else {
+        currentAnswers()[target.dataset.questionId] = target.value;
+      }
     } else {
       return;
     }
@@ -559,6 +576,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       session.readingScore = scoreSection(exam.reading || [], session.readingAnswers || {});
       session.scoringVersion = 3;
       saveSession(session);
+      examGuard.release();
       window.location.href = "student-writing.html";
     }
   }

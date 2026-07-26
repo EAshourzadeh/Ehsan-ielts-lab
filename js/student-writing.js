@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", async function () {
   const session = getSession();
   if (!session) { window.location.href = "student-login.html"; return; }
+  const examGuard = createExamGuard();
 
   document.getElementById("writingCandidateName").textContent = session.studentName;
   const exams = await getExams();
@@ -74,6 +75,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       session.resultId = resultId;
       await createResult(resultId, session);
       saveSession(session);
+      examGuard.release();
       window.location.href = "student-results.html";
     }
   }

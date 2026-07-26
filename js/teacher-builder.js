@@ -82,6 +82,9 @@ function initComposer() {
       // fill
       delete question.options;
       if (!Array.isArray(question.answer)) question.answer = question.answer || "";
+      if (Array.isArray(question.blankAnswers)) {
+        question.blankAnswers = question.blankAnswers.map(key => Array.isArray(key) ? key.filter(Boolean) : (key || ""));
+      }
     }
     return question;
   }
@@ -140,6 +143,7 @@ function initComposer() {
 
   function questionWeightLocal(question) {
     if (!question || question.type === "label") return 0;
+    if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) return question.blankAnswers.length;
     if (question.type === "multi") {
       const count = Array.isArray(question.answer) ? question.answer.length : 0;
       return count > 0 ? count : 2;
@@ -151,7 +155,7 @@ function initComposer() {
     let count = 1;
     const parts = state.exam[section] || [];
     for (let p = 0; p < parts.length; p += 1) {
-      for (const question of parts[p].questions || []) {
+      for (const question of orderedQuestions(parts[p])) {
         if (p === partIndex && question.id === questionId) return count;
         count += questionWeightLocal(question);
       }
@@ -159,11 +163,31 @@ function initComposer() {
     return count;
   }
 
+  function orderedQuestions(part) {
+    const byId = new Map((part.questions || []).map(question => [question.id, question]));
+    const seen = new Set();
+    const ordered = [];
+    (part.questionGroups || []).forEach(group => (group.questionIds || []).forEach(id => {
+      if (byId.has(id) && !seen.has(id)) {
+        ordered.push(byId.get(id));
+        seen.add(id);
+      }
+    }));
+    (part.questions || []).forEach(question => {
+      if (!seen.has(question.id)) ordered.push(question);
+    });
+    return ordered;
+  }
+
+  function syncQuestionOrder(part) {
+    part.questions = orderedQuestions(part);
+  }
+
   function answerErrors(question) {
     if (question.type === "label") return [];
     if (question.type === "fill") {
-      const hasAnswer = Array.isArray(question.answer) ? question.answer.some(Boolean) : String(question.answer || "").trim();
-      return hasAnswer ? [] : ["Add an accepted answer."];
+      const keys = Array.isArray(question.blankAnswers) && question.blankAnswers.length ? question.blankAnswers : [question.answer];
+      return keys.every(key => Array.isArray(key) ? key.some(Boolean) : String(key || "").trim()) ? [] : ["Add an accepted answer for every blank."];
     }
     if (question.type === "tfng") return question.answer ? [] : ["Select the correct answer."];
     const options = (question.options || []).filter(option => String(option).trim());
@@ -189,6 +213,7 @@ function initComposer() {
 
   /* ---------- Rendering ---------- */
   function renderAll() {
+    disposeAllQuills();
     $("#examName").value = state.exam.name || "";
     document.querySelectorAll(".builder-tab").forEach(tab => tab.classList.toggle("active", tab.dataset.section === state.activeSection));
     document.querySelectorAll(".builder-pane").forEach(pane => pane.classList.toggle("active", pane.id === `pane-${state.activeSection}`));
@@ -334,7 +359,8 @@ function initComposer() {
           <option value="tfng" ${question.type === "tfng" ? "selected" : ""}>True / False / Not Given</option>
           <option value="label" ${question.type === "label" ? "selected" : ""}>Label / text block (not scored)</option>
         </select>
-        ${question.type === "multi" ? `<span class="muted small multi-weight-hint">Counts as ${questionWeightLocal(question)} questions in the numbering</span>` : ""}
+        ${questionWeightLocal(question) > 1 ? `<span class="muted small multi-weight-hint">Counts as ${questionWeightLocal(question)} questions in the numbering</span>` : ""}
+        <button class="btn btn-primary btn-sm" type="button" data-action="save-question">Save question</button>
         <button class="btn btn-danger btn-sm" type="button" data-action="remove-question" style="margin-left:auto;">Delete</button>
       </div>
       ${isLabel ? "" : `
@@ -356,6 +382,14 @@ function initComposer() {
   function answerEditorMarkup(question) {
     if (question.type === "label") return "";
     if (question.type === "fill") {
+      if (Array.isArray(question.blankAnswers) && question.blankAnswers.length > 1) {
+        return `<label class="builder-field-label">Accepted answer(s) for each blank</label>
+          ${question.blankAnswers.map((key, index) => {
+            const answer = Array.isArray(key) ? key.join(" | ") : (key || "");
+            return `<div class="option-row"><strong>Blank ${index + 1}</strong><input class="text-input" data-field="blank-answer" data-blank-index="${index}" value="${escapeAttribute(answer)}" placeholder="e.g. 10 | ten"></div>`;
+          }).join("")}
+          <p class="muted small answer-help">Each inline blank is numbered and scored separately. Use <code>|</code> for accepted alternatives.</p>`;
+      }
       const answer = Array.isArray(question.answer) ? question.answer.join(" | ") : (question.answer || "");
       return `<label class="builder-field-label">Accepted answer(s)</label>
         <input class="text-input" data-field="fill-answer" value="${escapeAttribute(answer)}" placeholder="e.g. 10 | ten">
@@ -562,6 +596,8 @@ function initComposer() {
     state.groupLabelQuills.clear();
     state.passageQuills.clear();
     state.introQuills.clear();
+    state.task1Quill = null;
+    state.task2Quill = null;
   }
 
   /* ---------- Interaction ---------- */
@@ -677,7 +713,17 @@ function initComposer() {
       if (target < 0 || target >= ctx.group.questionIds.length) return;
       flushAllEditors();
       [ctx.group.questionIds[position], ctx.group.questionIds[target]] = [ctx.group.questionIds[target], ctx.group.questionIds[position]];
+      syncQuestionOrder(ctx.part);
       markDirty(); renderAll();
+      return;
+    }
+    if (action === "save-question") {
+      flushAllEditors();
+      syncStemBlankAnswers(ctx.question);
+      state.activeQuestionId = null;
+      markDirty();
+      renderAll();
+      $("#builderSaveMsg").textContent = "Question changes kept locally — submit the exam to publish.";
       return;
     }
     if (action === "add-option") { flushAllEditors(); ctx.question.options.push(""); markDirty(); renderAll(); return; }
@@ -748,6 +794,7 @@ function initComposer() {
       flushAllEditors();
       const type = target.value;
       ctx.question.type = type;
+      delete ctx.question.blankAnswers;
       if (type === "tfng") { ctx.question.options = [...TFNG_OPTIONS]; ctx.question.answer = ""; }
       else if (type === "mc" || type === "multi") { ctx.question.options = ["", "", ""]; if (type === "multi") ctx.question.options.push(""); ctx.question.answer = type === "multi" ? [] : ""; }
       else { delete ctx.question.options; ctx.question.answer = ""; }
@@ -757,6 +804,13 @@ function initComposer() {
     if (field === "fill-answer" && ctx.question) {
       const alternatives = target.value.split("|").map(value => value.trim()).filter(Boolean);
       ctx.question.answer = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
+      markDirty(); renderInspector();
+      return;
+    }
+    if (field === "blank-answer" && ctx.question) {
+      const index = Number(target.dataset.blankIndex);
+      const alternatives = target.value.split("|").map(value => value.trim()).filter(Boolean);
+      ctx.question.blankAnswers[index] = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
       markDirty(); renderInspector();
       return;
     }
@@ -894,6 +948,25 @@ function initComposer() {
     quill.insertEmbed(range.index, "answerSlot", { id: makeId("slot"), size: "medium" }, "user");
     quill.insertText(range.index + 1, " ", "user");
     quill.setSelection(range.index + 2, 0, "silent");
+    question.text = cleanRichHtml(quill.root.innerHTML);
+    syncStemBlankAnswers(question);
+    markDirty();
+    renderAll();
+  }
+
+  function syncStemBlankAnswers(question) {
+    if (!question || question.type !== "fill") return;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = question.text || "";
+    const count = wrap.querySelectorAll(".ielts-answer-slot").length;
+    if (count <= 1) {
+      if (Array.isArray(question.blankAnswers) && question.blankAnswers.length) question.answer = question.blankAnswers[0];
+      delete question.blankAnswers;
+      return;
+    }
+    const previous = Array.isArray(question.blankAnswers) ? question.blankAnswers : [question.answer || ""];
+    question.blankAnswers = Array.from({ length: count }, (_, index) => previous[index] || "");
+    question.answer = question.blankAnswers[0] || "";
   }
 
   function showSymbolPicker(anchor, question) {
@@ -933,6 +1006,10 @@ function initComposer() {
   /* ---------- Save ---------- */
   async function save() {
     flushAllEditors();
+    ["listening", "reading"].forEach(section => (state.exam[section] || []).forEach(part => {
+      syncQuestionOrder(part);
+      (part.questions || []).forEach(syncStemBlankAnswers);
+    }));
     const errors = allAnswerErrors();
     if (errors.length && !confirm(`${errors.length} answer-key issue(s) remain. Save anyway?`)) return;
     state.exam.name = $("#examName").value.trim() || "Untitled IELTS Exam";

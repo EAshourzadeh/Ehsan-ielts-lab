@@ -165,6 +165,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function questionScoreWeight(question) {
       if (!question || question.type === "label") return 0;
+      if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) return question.blankAnswers.length;
       if (question.type === "multi") {
         const count = Array.isArray(question.answer) ? question.answer.length : 0;
         return count > 0 ? count : 2;
@@ -203,6 +204,12 @@ document.addEventListener("DOMContentLoaded", function () {
           const given = (answers || {})[question.id];
           if (question.type === "multi") {
             correct += multiMatch(question, given).matched;
+          } else if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) {
+            const givenValues = Array.isArray(given) ? given : [given];
+            question.blankAnswers.forEach((answerKey, index) => {
+              const accepted = Array.isArray(answerKey) ? answerKey : [answerKey];
+              if (normalizeAnswer(givenValues[index]) && accepted.some(key => normalizeAnswer(key) === normalizeAnswer(givenValues[index]))) correct += 1;
+            });
           } else if (answerStatus(question, given) === "correct") {
             correct += 1;
           }
@@ -654,10 +661,6 @@ document.addEventListener("DOMContentLoaded", function () {
       const submitted = result.submittedAt ? new Date(result.submittedAt).toLocaleDateString() : "Unknown date";
       const listeningRaw = result.listeningScore ? `${result.listeningScore.correct}/${result.listeningScore.total}` : "—";
       const readingRaw = result.readingScore ? `${result.readingScore.correct}/${result.readingScore.total}` : "—";
-      const criteria = result.writingCriteria || {};
-      const task1 = criteria.task1 || {};
-      const task2 = criteria.task2 || {};
-      const hasWritingBreakdown = result.writingTask1Band != null || result.writingTask2Band != null;
       return `
         <main class="report-page">
           <header class="report-hero">
@@ -675,17 +678,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 <tr><td>Speaking</td><td>Teacher graded</td><td>${escapeHtml(result.speakingBand ?? "Not graded")}</td></tr>
               </tbody>
             </table>
-            ${hasWritingBreakdown ? `
-            <table class="report-table writing-breakdown">
-              <thead><tr><th>Writing criterion</th><th>Task 1 (33%)</th><th>Task 2 (67%)</th></tr></thead>
-              <tbody>
-                <tr><td>Task Achievement / Response</td><td>${escapeHtml(task1.taskAchievement ?? "—")}</td><td>${escapeHtml(task2.taskResponse ?? "—")}</td></tr>
-                <tr><td>Coherence and Cohesion</td><td>${escapeHtml(task1.coherenceCohesion ?? "—")}</td><td>${escapeHtml(task2.coherenceCohesion ?? "—")}</td></tr>
-                <tr><td>Lexical Resource</td><td>${escapeHtml(task1.lexicalResource ?? "—")}</td><td>${escapeHtml(task2.lexicalResource ?? "—")}</td></tr>
-                <tr><td>Grammatical Range and Accuracy</td><td>${escapeHtml(task1.grammaticalRange ?? "—")}</td><td>${escapeHtml(task2.grammaticalRange ?? "—")}</td></tr>
-                <tr><td><strong>Task Band</strong></td><td><strong>${escapeHtml(result.writingTask1Band ?? "—")}</strong></td><td><strong>${escapeHtml(result.writingTask2Band ?? "—")}</strong></td></tr>
-              </tbody>
-            </table>` : ""}
             <div class="overall"><span>Overall Band</span><strong>${escapeHtml(overall)}</strong></div>
             ${result.writingFeedback ? `<section class="feedback"><h2>Teacher feedback</h2><p>${escapeHtml(result.writingFeedback)}</p></section>` : ""}
           </div>
