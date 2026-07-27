@@ -151,6 +151,47 @@
 
 .exam-question-group {
   margin: 0 0 24px;
+  border: 1px solid var(--color-border, #d7dee5);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  overflow: hidden;
+}
+
+.exam-question-group-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 15px;
+  color: var(--color-teal-800, #245c57);
+  background: var(--color-surface-subtle, #f8fafb);
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.exam-question-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.exam-question-group-summary::after {
+  content: "−";
+  font-size: 1.1rem;
+}
+
+.exam-question-group:not([open]) .exam-question-group-summary::after {
+  content: "+";
+}
+
+.exam-question-group-summary small {
+  margin-left: auto;
+  color: var(--color-text-muted, #68768a);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.exam-question-group-body {
+  padding: 15px 16px 2px;
 }
 
 .exam-question-group-label {

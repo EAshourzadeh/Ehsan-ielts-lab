@@ -452,6 +452,27 @@
   font-size: 0.76rem;
 }
 
+.writing-response-tools {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.copy-writing-btn {
+  padding: 5px 8px;
+  border: 1px solid #cfd7e3;
+  border-radius: 7px;
+  color: #2e6b66;
+  background: #fff;
+  font: 700 0.72rem/1 "IBM Plex Sans", sans-serif;
+  cursor: pointer;
+}
+
+.copy-writing-btn:hover {
+  border-color: #2e6b66;
+  background: #e7f1ef;
+}
+
 .grading-essay {
   max-height: 360px;
   overflow: auto;
