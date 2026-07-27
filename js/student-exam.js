@@ -22,6 +22,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     partIndex: 0,
     timerSeconds: 0,
     timerHandle: null,
+    timerStarted: false,
+    advanceHandle: null,
     lastPartMediaReady: false,
     visitedReadingParts: new Set()
   };
@@ -30,9 +32,13 @@ document.addEventListener("DOMContentLoaded", async function () {
   startSection("listening");
 
   function startSection(section) {
+    clearTimeout(runner.advanceHandle);
+    runner.advanceHandle = null;
+    document.getElementById("runnerQuestionsPane").classList.remove("part-locked");
     runner.section = section;
     runner.parts = section === "listening" ? (exam.listening || []) : (exam.reading || []);
     runner.timerSeconds = SECTION_TIMES[section];
+    runner.timerStarted = false;
     document.getElementById("runnerSectionTag").textContent = section.toUpperCase();
 
     if (runner.parts.length === 0) {
@@ -46,6 +52,12 @@ document.addEventListener("DOMContentLoaded", async function () {
     } else {
       renderRunnerPart(0, false);
     }
+    updateTimerDisplay();
+  }
+
+  function ensureSectionTimerStarted() {
+    if (runner.timerStarted) return;
+    runner.timerStarted = true;
     startTimer("runnerTimer", submitSection);
   }
 
@@ -240,6 +252,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function moveToPart(partIdx) {
     syncVisibleAnswers();
+    clearTimeout(runner.advanceHandle);
+    runner.advanceHandle = null;
+    const audio = document.getElementById("listeningAudioEl");
+    if (audio) audio.pause();
     renderRunnerPart(partIdx, false);
   }
 
@@ -265,7 +281,10 @@ document.addEventListener("DOMContentLoaded", async function () {
       </div>`;
     document.getElementById("navBubbles").innerHTML = "";
     updateSubmitGate();
-    document.getElementById("btnStartReading").addEventListener("click", () => renderRunnerPart(0, false));
+    document.getElementById("btnStartReading").addEventListener("click", () => {
+      ensureSectionTimerStarted();
+      renderRunnerPart(0, false);
+    });
   }
 
 
@@ -284,21 +303,31 @@ document.addEventListener("DOMContentLoaded", async function () {
       `${runner.section === "listening" ? "Part" : "Passage"} ${partIdx + 1} of ${runner.parts.length} — ${part.title}`;
 
     const passagePane = document.getElementById("runnerPassagePane");
+    const qPane = document.getElementById("runnerQuestionsPane");
+    passagePane.scrollTop = 0;
+    qPane.scrollTop = 0;
+    qPane.classList.remove("part-locked");
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     if (runner.section === "listening") {
       passagePane.innerHTML = `
         <div class="audio-player-block">
           <h3>${part.title}</h3>
           <p class="muted small">Audio plays once and cannot be paused, rewound, or downloaded. If you want to move on before the audio finishes, make sure you have entered your answers, then use <strong>Skip This Part</strong>.</p>
-          <div class="custom-audio-player">
+          <div class="custom-audio-player audio-actions">
             <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
-            <button class="btn btn-ghost btn-sm" id="audioSkipBtn">Skip This Part</button>
-            <div class="audio-status" id="audioStatus" style="display:none;"></div>
+            <button class="btn btn-ghost" id="audioSkipBtn">Skip This Part</button>
+          </div>
+          <div class="audio-status" id="audioStatus">Ready to play</div>
+          <div class="audio-progress" id="audioProgress" hidden>
+            <div class="audio-progress-meta"><span>Part progress</span><strong id="audioRemaining">Loading duration…</strong></div>
+            <div class="audio-progress-track"><div class="audio-progress-fill" id="audioProgressFill"></div></div>
           </div>
           <audio id="listeningAudioEl" preload="auto" src="${escapeAttribute(part.audio || "")}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
-          <div id="nextPartWrap" style="display:none;margin-top:18px;">
+          <div id="nextPartWrap" class="next-part-wrap" hidden>
             ${isLastPart
-              ? `<p class="muted small">This was the final Listening part. Use <strong>Submit Section</strong> above when you're ready to move on to Reading.</p>`
-              : `<button class="btn btn-primary" id="btnNextPart">Next Part &rarr;</button>`}
+              ? `<button class="btn btn-primary btn-lg" id="btnNextPart">Continue to Reading &rarr;</button>`
+              : `<button class="btn btn-primary btn-lg" id="btnNextPart">Next Part &rarr;</button>`}
+            <p class="muted small">Moving on automatically in a moment…</p>
           </div>
         </div>`;
       wireAudioPlayer(part);
@@ -323,12 +352,18 @@ document.addEventListener("DOMContentLoaded", async function () {
       passagePane.querySelectorAll("[data-reading-next]").forEach(button => button.addEventListener("click", () => moveToPart(partIdx + 1)));
     }
 
-    const qPane = document.getElementById("runnerQuestionsPane");
     qPane.innerHTML = "";
-    displayQuestionGroups(part, partIdx).forEach(group => {
-      const section = document.createElement("section");
+    displayQuestionGroups(part, partIdx).forEach((group, groupIndex) => {
+      const section = document.createElement("details");
       section.className = "exam-question-group";
+      section.open = true;
       const range = formatQuestionRange(group.entries);
+      const summary = document.createElement("summary");
+      summary.className = "exam-question-group-summary";
+      summary.innerHTML = `<span>${range || `Question group ${groupIndex + 1}`}</span><small>Collapse / expand</small>`;
+      section.appendChild(summary);
+      const groupBody = document.createElement("div");
+      groupBody.className = "exam-question-group-body";
       const showAutomaticRange = range && !richLabelIncludesQuestionRange(group.label);
       if (showAutomaticRange || hasRichContent(group.label)) {
         const label = document.createElement("div");
@@ -336,17 +371,18 @@ document.addEventListener("DOMContentLoaded", async function () {
         label.innerHTML = `
           ${showAutomaticRange ? `<div class="exam-question-range">${range}</div>` : ""}
           ${hasRichContent(group.label) ? `<div class="exam-rich-content">${group.label}</div>` : ""}`;
-        section.appendChild(label);
+        groupBody.appendChild(label);
       }
       if ((group.contentBlocks || []).length) {
         const answersById = currentAnswers();
         group.contentBlocks.forEach(block => {
           const wrap = document.createElement("div");
           wrap.innerHTML = renderContentBlock(block, answersById, false);
-          if (wrap.firstElementChild) section.appendChild(wrap.firstElementChild);
+          if (wrap.firstElementChild) groupBody.appendChild(wrap.firstElementChild);
         });
       }
-      group.entries.forEach(entry => section.appendChild(renderQuestionBlock(entry.question, entry.number, entry.endNumber)));
+      group.entries.forEach(entry => groupBody.appendChild(renderQuestionBlock(entry.question, entry.number, entry.endNumber)));
+      section.appendChild(groupBody);
       qPane.appendChild(section);
     });
     renderNavBubbles(part.questions || [], partIdx);
@@ -359,38 +395,87 @@ document.addEventListener("DOMContentLoaded", async function () {
     const skipBtn = document.getElementById("audioSkipBtn");
     const statusEl = document.getElementById("audioStatus");
     const nextWrap = document.getElementById("nextPartWrap");
+    const progressEl = document.getElementById("audioProgress");
+    const progressFill = document.getElementById("audioProgressFill");
+    const remainingEl = document.getElementById("audioRemaining");
+    const activePartIndex = runner.partIndex;
 
     audioEl.addEventListener("contextmenu", event => event.preventDefault());
 
     let lastAllowedTime = 0;
-    audioEl.addEventListener("timeupdate", () => { lastAllowedTime = audioEl.currentTime; });
+    audioEl.addEventListener("timeupdate", () => {
+      lastAllowedTime = audioEl.currentTime;
+      updateAudioProgress();
+    });
     audioEl.addEventListener("seeking", () => {
       if (Math.abs(audioEl.currentTime - lastAllowedTime) > 0.75) audioEl.currentTime = lastAllowedTime;
     });
 
+    function formatDuration(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return "Loading duration…";
+      const total = Math.ceil(seconds);
+      const minutes = Math.floor(total / 60).toString().padStart(2, "0");
+      const remainder = (total % 60).toString().padStart(2, "0");
+      return `${minutes}:${remainder} remaining`;
+    }
+
+    function updateAudioProgress() {
+      const duration = audioEl.duration;
+      const current = audioEl.currentTime;
+      progressEl.hidden = false;
+      remainingEl.textContent = formatDuration(Math.max(0, duration - current));
+      progressFill.style.width = Number.isFinite(duration) && duration > 0
+        ? `${Math.min(100, (current / duration) * 100)}%`
+        : "0%";
+    }
+
+    function lockCurrentPart() {
+      const questions = document.getElementById("runnerQuestionsPane");
+      questions.classList.add("part-locked");
+      questions.querySelectorAll("input, textarea, select, button").forEach(control => { control.disabled = true; });
+      questions.querySelectorAll(".q-option").forEach(option => {
+        option.setAttribute("aria-disabled", "true");
+        option.style.pointerEvents = "none";
+      });
+    }
+
+    function advanceFromCompletedPart() {
+      clearTimeout(runner.advanceHandle);
+      runner.advanceHandle = null;
+      if (runner.section !== "listening" || runner.partIndex !== activePartIndex) return;
+      if (activePartIndex === runner.parts.length - 1) submitSection();
+      else moveToPart(activePartIndex + 1);
+    }
+
+    audioEl.addEventListener("loadedmetadata", updateAudioProgress);
+
     function onMediaReady() {
       runner.lastPartMediaReady = true;
-      nextWrap.style.display = "block";
+      lockCurrentPart();
+      nextWrap.hidden = false;
       updateSubmitGate();
+      clearTimeout(runner.advanceHandle);
+      runner.advanceHandle = setTimeout(advanceFromCompletedPart, 2600);
     }
 
     playBtn.addEventListener("click", () => {
+      ensureSectionTimerStarted();
       audioEl.play().catch(() => {
-        statusEl.style.display = "block";
         statusEl.textContent = "Couldn't start audio automatically — check your browser's autoplay setting.";
+        playBtn.style.display = "";
       });
       playBtn.style.display = "none";
-      statusEl.style.display = "block";
       statusEl.textContent = "▶ Playing…";
+      progressEl.hidden = false;
     });
 
     skipBtn.addEventListener("click", () => {
       syncVisibleAnswers();
       if (!confirm("Skip this listening part? You won't be able to come back to it once you move on.")) return;
+      ensureSectionTimerStarted();
       audioEl.pause();
       playBtn.style.display = "none";
       skipBtn.style.display = "none";
-      statusEl.style.display = "block";
       statusEl.textContent = "⏭ Your answers (if any) have been saved, and this part was skipped.";
       onMediaReady();
     });
@@ -398,13 +483,14 @@ document.addEventListener("DOMContentLoaded", async function () {
     audioEl.addEventListener("ended", () => {
       syncVisibleAnswers();
       statusEl.textContent = "✓ Finished playing";
+      updateAudioProgress();
       skipBtn.style.display = "none";
       onMediaReady();
     });
 
     audioEl.addEventListener("error", () => {
       syncVisibleAnswers();
-      statusEl.style.display = "block";
+      ensureSectionTimerStarted();
       statusEl.textContent = `⚠ Audio file not found at ${part.audio || "the configured path"}.`;
       playBtn.style.display = "none";
       skipBtn.style.display = "none";
@@ -412,7 +498,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
 
     const nextBtn = document.getElementById("btnNextPart");
-    if (nextBtn) nextBtn.addEventListener("click", () => moveToPart(runner.partIndex + 1));
+    if (nextBtn) nextBtn.addEventListener("click", advanceFromCompletedPart);
   }
 
   function renderQuestionBlock(question, questionNumber, endNumber) {
@@ -468,6 +554,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   document.getElementById("runnerQuestionsPane").addEventListener("click", event => {
+    if (document.getElementById("runnerQuestionsPane").classList.contains("part-locked")) return;
     const option = event.target.closest(".q-option");
     if (!option) return;
 
@@ -565,6 +652,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function submitSection() {
     syncVisibleAnswers();
+    clearTimeout(runner.advanceHandle);
+    runner.advanceHandle = null;
+    const audio = document.getElementById("listeningAudioEl");
+    if (audio) audio.pause();
     clearTimer();
 
     if (runner.section === "listening") {
@@ -583,13 +674,9 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function startTimer(displayId, onExpire) {
     clearTimer();
-    const element = document.getElementById(displayId);
 
     const tick = () => {
-      const minutes = Math.floor(runner.timerSeconds / 60).toString().padStart(2, "0");
-      const seconds = (runner.timerSeconds % 60).toString().padStart(2, "0");
-      element.textContent = `${minutes}:${seconds}`;
-      element.classList.toggle("urgent", runner.timerSeconds <= 300);
+      updateTimerDisplay();
 
       if (runner.timerSeconds <= 0) {
         clearTimer();
@@ -601,6 +688,14 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     tick();
     runner.timerHandle = setInterval(tick, 1000);
+  }
+
+  function updateTimerDisplay() {
+    const element = document.getElementById("runnerTimer");
+    const minutes = Math.floor(runner.timerSeconds / 60).toString().padStart(2, "0");
+    const seconds = (runner.timerSeconds % 60).toString().padStart(2, "0");
+    element.textContent = `${minutes}:${seconds}`;
+    element.classList.toggle("urgent", runner.timerStarted && runner.timerSeconds <= 300);
   }
 
   function clearTimer() {

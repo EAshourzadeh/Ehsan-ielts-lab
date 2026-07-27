@@ -308,7 +308,7 @@ function registerAnswerSlotBlot() {
 function slotInputHtml(question, slotId, size, value, disabled, blankIndex) {
   const safeValue = String(value || "").replace(/"/g, "&quot;");
   const indexAttribute = Number.isInteger(blankIndex) ? ` data-blank-index="${blankIndex}"` : "";
-  return `<input type="text" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}"${indexAttribute} value="${safeValue}" autocomplete="off" ${disabled ? "disabled" : ""}>`;
+  return `<input type="text" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}"${indexAttribute} value="${safeValue}" placeholder="Your answer" autocomplete="off" ${disabled ? "disabled" : ""}>`;
 }
 
 /* Converts every <span class="ielts-answer-slot"> embedded in a question's rich

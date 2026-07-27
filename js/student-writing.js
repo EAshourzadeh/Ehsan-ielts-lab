@@ -7,6 +7,8 @@ document.addEventListener("DOMContentLoaded", async function () {
   const exams = await getExams();
   const exam = exams[session.examId];
   let timerSeconds = 0, timerHandle = null, currentTask = 1;
+  let taskTransitioning = false;
+  let finalSubmitting = false;
 
   // IELTS conversion tables assume 40 objective questions. Custom exams may contain
   // fewer questions, so scale their percentage to a 40-question equivalent first.
@@ -54,14 +56,25 @@ document.addEventListener("DOMContentLoaded", async function () {
   submitBtn.addEventListener("click", submitTask);
 
   async function submitTask() {
+    if (taskTransitioning || finalSubmitting) return;
     clearTimer();
     const text = area.value;
     if (currentTask === 1) {
-      session.writingTask1 = text;
-      saveSession(session);
-      showTask(2);
+      taskTransitioning = true;
+      try {
+        session.writingTask1 = text;
+        saveSession(session);
+        showTask(2);
+      } finally {
+        taskTransitioning = false;
+      }
     } else {
-      submitBtn.disabled = true; submitBtn.textContent = "Submitting...";
+      finalSubmitting = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Submitting...";
+      const status = document.getElementById("writingSubmitStatus");
+      status.classList.remove("error");
+      status.textContent = "Saving your completed exam…";
       session.writingTask2 = text;
       session.submittedAt = new Date().toISOString();
       const listeningResult = scoreToBand(session.listeningScore);
@@ -71,12 +84,22 @@ document.addEventListener("DOMContentLoaded", async function () {
       session.listeningEquivalentRaw40 = listeningResult.equivalentRaw40;
       session.readingEquivalentRaw40 = readingResult.equivalentRaw40;
       session.scoringVersion = 2;
-      const resultId = generateResultId();
+      const resultId = session.resultId || generateResultId();
       session.resultId = resultId;
-      await createResult(resultId, session);
       saveSession(session);
-      examGuard.release();
-      window.location.href = "student-results.html";
+      try {
+        await createResult(resultId, session);
+        status.textContent = "Saved.";
+        examGuard.release();
+        window.location.href = "student-results.html";
+      } catch (error) {
+        console.error("Final exam submission failed", error);
+        finalSubmitting = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Try Submit Again";
+        status.textContent = "Could not save your result. Check the connection and try again.";
+        status.classList.add("error");
+      }
     }
   }
 

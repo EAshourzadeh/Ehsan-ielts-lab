@@ -462,11 +462,11 @@ document.addEventListener("DOMContentLoaded", function () {
           <summary><span>Writing review</span><small>Read and assess both tasks</small></summary>
           <div class="grading-section-body writing-review-grid">
             <article class="writing-response-card">
-              <header><strong>Task 1</strong><span>${wordCount(result.writingTask1)} words</span></header>
+              <header><strong>Task 1</strong><span class="writing-response-tools"><span>${wordCount(result.writingTask1)} words</span><button type="button" class="copy-writing-btn" data-copy-writing="task1" aria-label="Copy Task 1 response" title="Copy Task 1 response">⧉ Copy</button></span></header>
               <div class="grading-essay">${escapeHtml(result.writingTask1 || "(blank)")}</div>
             </article>
             <article class="writing-response-card">
-              <header><strong>Task 2</strong><span>${wordCount(result.writingTask2)} words</span></header>
+              <header><strong>Task 2</strong><span class="writing-response-tools"><span>${wordCount(result.writingTask2)} words</span><button type="button" class="copy-writing-btn" data-copy-writing="task2" aria-label="Copy Task 2 response" title="Copy Task 2 response">⧉ Copy</button></span></header>
               <div class="grading-essay">${escapeHtml(result.writingTask2 || "(blank)")}</div>
             </article>
           </div>
@@ -522,6 +522,30 @@ document.addEventListener("DOMContentLoaded", function () {
       hasUnsavedChanges = true;
     }
 
+    async function copyWritingResponse(text, button) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text || "");
+        } else {
+          const helper = document.createElement("textarea");
+          helper.value = text || "";
+          helper.setAttribute("readonly", "");
+          helper.style.position = "fixed";
+          helper.style.opacity = "0";
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand("copy");
+          helper.remove();
+        }
+        const original = button.textContent;
+        button.textContent = "✓ Copied";
+        setTimeout(() => { button.textContent = original; }, 1400);
+      } catch (error) {
+        button.textContent = "Copy failed";
+        setTimeout(() => { button.textContent = "⧉ Copy"; }, 1600);
+      }
+    }
+
     function bindDetailEvents() {
       const detail = document.getElementById("gradingDetail");
       const speakingSelect = detail.querySelector("[data-grade-speaking]");
@@ -531,6 +555,15 @@ document.addEventListener("DOMContentLoaded", function () {
       const recalculateButton = detail.querySelector("[data-recalculate-objective]");
 
       const detailId = renderedDetailId;
+      const selectedResult = detailId ? merged(detailId) : null;
+      detail.querySelectorAll("[data-copy-writing]").forEach(button => {
+        button.addEventListener("click", () => {
+          const text = button.dataset.copyWriting === "task1"
+            ? selectedResult.writingTask1
+            : selectedResult.writingTask2;
+          copyWritingResponse(text || "", button);
+        });
+      });
       detail.querySelectorAll("[data-review-section]").forEach(section => {
         section.addEventListener("toggle", () => {
           if (!detailId) return;
