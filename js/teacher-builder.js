@@ -14,6 +14,7 @@ function initComposer() {
     groupLabelQuills: new Map(),  // groupId -> Quill (snow mode, group instructions)
     passageQuills: new Map(),     // partIndex -> Quill (snow mode, reading passage)
     introQuills: new Map(),       // partIndex -> Quill (snow mode, reading intro/timing note)
+    collapsedGroups: new Set(),   // group IDs collapsed in the current builder session
     task1Quill: null,
     task2Quill: null,
     hasUnsavedChanges: false
@@ -83,7 +84,7 @@ function initComposer() {
       delete question.options;
       if (!Array.isArray(question.answer)) question.answer = question.answer || "";
       if (Array.isArray(question.blankAnswers)) {
-        question.blankAnswers = question.blankAnswers.map(key => Array.isArray(key) ? key.filter(Boolean) : (key || ""));
+        question.blankAnswers = question.blankAnswers.map(key => Array.isArray(key) ? key.filter(Boolean).join(" | ") : (key || ""));
       }
     }
     return question;
@@ -187,7 +188,7 @@ function initComposer() {
     if (question.type === "label") return [];
     if (question.type === "fill") {
       const keys = Array.isArray(question.blankAnswers) && question.blankAnswers.length ? question.blankAnswers : [question.answer];
-      return keys.every(key => Array.isArray(key) ? key.some(Boolean) : String(key || "").trim()) ? [] : ["Add an accepted answer for every blank."];
+      return keys.every(key => String(Array.isArray(key) ? key.join(" | ") : (key || "")).split("|").some(value => value.trim())) ? [] : ["Add an accepted answer for every blank."];
     }
     if (question.type === "tfng") return question.answer ? [] : ["Select the correct answer."];
     const options = (question.options || []).filter(option => String(option).trim());
@@ -276,18 +277,21 @@ function initComposer() {
   }
 
   function groupMarkup(section, part, group, partIndex) {
+    const isCollapsed = state.collapsedGroups.has(group.id);
     const consumedByBlocks = contentBlocksConsumedIds(group.contentBlocks);
     const questions = group.questionIds
       .map(id => part.questions.find(question => question.id === id))
       .filter(question => question && !consumedByBlocks.has(question.id));
     const rangeText = questionRangeText(section, partIndex, group);
-    return `<section class="question-group-editor-card enhanced-builder-card" data-group-id="${group.id}">
+    return `<section class="question-group-editor-card enhanced-builder-card ${isCollapsed ? "is-collapsed" : ""}" data-group-id="${group.id}">
       <div class="group-card-head">
         <div><strong>${escapeHtml(rangeText)}</strong></div>
         <div class="toolbar-row">
+          <button class="btn btn-ghost btn-sm group-collapse-btn" type="button" data-action="toggle-group" aria-expanded="${!isCollapsed}">${isCollapsed ? "Expand" : "Collapse"}</button>
           <button class="btn btn-ghost btn-sm" type="button" data-action="remove-group">Remove group</button>
         </div>
       </div>
+      <div class="question-group-editor-body" ${isCollapsed ? "hidden" : ""}>
       <label class="builder-field-label">Group instructions</label>
       <p class="builder-help small muted">Shown once above these questions — e.g. "Complete the notes below. Write ONE WORD AND/OR A NUMBER for each answer."</p>
       <div class="rich-editor question-label-editor" data-group-label="${group.id}"></div>
@@ -305,6 +309,7 @@ function initComposer() {
       <div class="builder-add-row">
         <button class="btn btn-primary btn-sm" type="button" data-action="add-question">+ Add Question</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-label">+ Add Label / Text Block</button>
+      </div>
       </div>
     </section>`;
   }
@@ -493,8 +498,20 @@ function initComposer() {
 
   function renderWriting() {
     const writing = state.exam.writing || (state.exam.writing = {});
-    if (!state.task1Quill) state.task1Quill = new Quill("#writingTask1Prompt", { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
-    if (!state.task2Quill) state.task2Quill = new Quill("#writingTask2Prompt", { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+    const task1Element = $("#writingTask1Prompt");
+    const task2Element = $("#writingTask2Prompt");
+    if (!state.task1Quill) {
+      while (task1Element.previousElementSibling?.classList.contains("ql-toolbar")) task1Element.previousElementSibling.remove();
+      task1Element.replaceChildren();
+      task1Element.classList.remove("ql-container", "ql-snow");
+      state.task1Quill = new Quill(task1Element, { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+    }
+    if (!state.task2Quill) {
+      while (task2Element.previousElementSibling?.classList.contains("ql-toolbar")) task2Element.previousElementSibling.remove();
+      task2Element.replaceChildren();
+      task2Element.classList.remove("ql-container", "ql-snow");
+      state.task2Quill = new Quill(task2Element, { theme: "snow", modules: { toolbar: RICH_TOOLBAR } });
+    }
     if (state.task1Quill.root.innerHTML !== (writing.task1Prompt || "")) state.task1Quill.root.innerHTML = writing.task1Prompt || "";
     if (state.task2Quill.root.innerHTML !== (writing.task2Prompt || "")) state.task2Quill.root.innerHTML = writing.task2Prompt || "";
     if (!state.task1Quill.__wired) {
@@ -660,6 +677,18 @@ function initComposer() {
       renderAll();
       return;
     }
+    if (action === "toggle-group") {
+      flushAllEditors();
+      const groupId = ctx.group.id;
+      if (state.collapsedGroups.has(groupId)) {
+        state.collapsedGroups.delete(groupId);
+      } else {
+        state.collapsedGroups.add(groupId);
+        if ((ctx.group.questionIds || []).includes(state.activeQuestionId)) state.activeQuestionId = null;
+      }
+      renderAll();
+      return;
+    }
     if (action === "remove-part") {
       if (confirm("Remove this part and all of its questions?")) { flushAllEditors(); state.exam[ctx.section].splice(ctx.partIndex, 1); markDirty(); renderAll(); }
       return;
@@ -810,7 +839,7 @@ function initComposer() {
     if (field === "blank-answer" && ctx.question) {
       const index = Number(target.dataset.blankIndex);
       const alternatives = target.value.split("|").map(value => value.trim()).filter(Boolean);
-      ctx.question.blankAnswers[index] = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
+      ctx.question.blankAnswers[index] = alternatives.join(" | ");
       markDirty(); renderInspector();
       return;
     }
@@ -1015,15 +1044,22 @@ function initComposer() {
     state.exam.name = $("#examName").value.trim() || "Untitled IELTS Exam";
     state.exam.writing.task1Image = $("#writingTask1Image").value.trim();
     const button = $("#btnSubmitExam");
-    button.disabled = true; button.textContent = "Saving...";
-    await saveExam(state.exam);
-    state.exams[state.exam.id] = state.exam;
-    button.disabled = false; button.textContent = "Submit Exam";
-    state.hasUnsavedChanges = false;
     const msg = $("#builderSaveMsg");
-    msg.textContent = "Exam saved ✓";
-    renderInspector();
-    setTimeout(() => { msg.textContent = ""; }, 2500);
+    button.disabled = true; button.textContent = "Saving...";
+    try {
+      await saveExam(state.exam);
+      state.exams[state.exam.id] = state.exam;
+      state.hasUnsavedChanges = false;
+      msg.textContent = "Exam saved ✓";
+      renderInspector();
+      setTimeout(() => { msg.textContent = ""; }, 2500);
+    } catch (error) {
+      console.error("Exam save failed", error);
+      msg.textContent = `Exam could not be saved: ${error.message || "Please try again."}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Submit Exam";
+    }
   }
 
   function escapeAttribute(value) { return escapeHtml(value); }

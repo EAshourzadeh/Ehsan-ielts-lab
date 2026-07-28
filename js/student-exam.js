@@ -29,6 +29,12 @@ document.addEventListener("DOMContentLoaded", async function () {
   };
 
   document.getElementById("runnerCandidateName").textContent = session.studentName;
+  const questionsPane = document.getElementById("runnerQuestionsPane");
+  ["copy", "cut", "paste", "contextmenu"].forEach(eventName => {
+    questionsPane.addEventListener(eventName, event => {
+      if (event.target.closest("input, textarea")) event.preventDefault();
+    });
+  });
   startSection("listening");
 
   function startSection(section) {

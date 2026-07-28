@@ -25,7 +25,7 @@ async function init() {
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
     if (!validStudentUsername(username) || !validStudentPassword(password)) {
-      errorBox.textContent = "Enter your five-digit username and five-character password.";
+      errorBox.textContent = "Enter your seven-digit username and six-character password.";
       return;
     }
     button.disabled = true;

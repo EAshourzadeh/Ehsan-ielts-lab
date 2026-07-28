@@ -207,7 +207,9 @@ document.addEventListener("DOMContentLoaded", function () {
           } else if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) {
             const givenValues = Array.isArray(given) ? given : [given];
             question.blankAnswers.forEach((answerKey, index) => {
-              const accepted = Array.isArray(answerKey) ? answerKey : [answerKey];
+              const accepted = Array.isArray(answerKey)
+                ? answerKey
+                : String(answerKey || "").split("|").map(value => value.trim()).filter(Boolean);
               if (normalizeAnswer(givenValues[index]) && accepted.some(key => normalizeAnswer(key) === normalizeAnswer(givenValues[index]))) correct += 1;
             });
           } else if (answerStatus(question, given) === "correct") {

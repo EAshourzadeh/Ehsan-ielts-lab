@@ -47,12 +47,13 @@ function initStudentAccounts() {
         await renderStudents();
       });
       card.querySelector('[data-action="password"]').addEventListener("click", async () => {
-        const currentCode = prompt("Enter the student’s current 5-character password:");
+        const currentCode = prompt("Enter the student’s current password (5-character legacy passwords are accepted here):");
         if (currentCode === null) return;
-        const newCode = prompt("Enter the new 5-character password (letters and numbers):");
+        const newCode = prompt("Enter the new 6-character password (letters and numbers):");
         if (newCode === null) return;
-        if (!validStudentPassword(currentCode) || !validStudentPassword(newCode)) {
-          showMessage("Both passwords must be five characters and contain a letter and a number.", true);
+        const legacyCurrentPassword = currentCode.length === 5 && /[a-z]/i.test(currentCode) && /\d/.test(currentCode);
+        if ((!validStudentPassword(currentCode) && !legacyCurrentPassword) || !validStudentPassword(newCode)) {
+          showMessage("The current password is invalid. The new password must be six characters and contain a letter and a number.", true);
           return;
         }
         const managedAuth = secondaryAuth();
@@ -76,8 +77,8 @@ function initStudentAccounts() {
     const username = document.getElementById("studentUsername").value.trim();
     const password = document.getElementById("studentPassword").value;
     if (!realName) return showMessage("Enter the student’s real name.", true);
-    if (!validStudentUsername(username)) return showMessage("Username must be exactly five digits.", true);
-    if (!validStudentPassword(password)) return showMessage("Password must be five characters and contain a letter and a number.", true);
+    if (!validStudentUsername(username)) return showMessage("Username must be exactly seven digits.", true);
+    if (!validStudentPassword(password)) return showMessage("Password must be six characters and contain a letter and a number.", true);
 
     const button = document.getElementById("btnCreateStudent");
     button.disabled = true;

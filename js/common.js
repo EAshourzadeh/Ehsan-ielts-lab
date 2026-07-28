@@ -139,10 +139,10 @@ function studentFirebasePassword(code) {
 function isStudentAccount(user) {
   return Boolean(user && /@students\.ehsan\.app$/i.test(user.email || ""));
 }
-function validStudentUsername(value) { return /^\d{5}$/.test(String(value || "")); }
+function validStudentUsername(value) { return /^\d{7}$/.test(String(value || "")); }
 function validStudentPassword(value) {
   const text = String(value || "");
-  return text.length === 5 && /[a-z]/i.test(text) && /\d/.test(text);
+  return text.length === 6 && /[a-z]/i.test(text) && /\d/.test(text);
 }
 
 /* ---------- Admin auth guard ----------
@@ -230,7 +230,9 @@ function scoreSection(parts, answers) {
       const givenValues = Array.isArray(answers[question.id]) ? answers[question.id] : [answers[question.id]];
       question.blankAnswers.forEach((answerKey, index) => {
         const given = (givenValues[index] || "").toString().trim().toLowerCase();
-        const accepted = Array.isArray(answerKey) ? answerKey : [answerKey];
+        const accepted = Array.isArray(answerKey)
+          ? answerKey
+          : String(answerKey || "").split("|").map(value => value.trim()).filter(Boolean);
         if (given && accepted.some(key => given === (key || "").toString().trim().toLowerCase())) correct += 1;
       });
     } else {
