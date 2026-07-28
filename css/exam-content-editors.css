@@ -71,6 +71,22 @@
   background: var(--color-surface-subtle, #f8fafb);
 }
 
+.question-group-editor-card.is-collapsed {
+  padding-bottom: 10px;
+}
+
+.question-group-editor-card.is-collapsed .group-card-head {
+  margin-bottom: 0;
+}
+
+.question-group-editor-body[hidden] {
+  display: none;
+}
+
+.group-collapse-btn {
+  min-width: 76px;
+}
+
 .question-group-editor-head {
   display: flex;
   align-items: center;
