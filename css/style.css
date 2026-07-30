@@ -832,6 +832,27 @@
     font-style: normal;
   }
 
+  .ql-align-center {
+  text-align: center;
+}
+
+.ql-align-right {
+  text-align: right;
+}
+
+.ql-align-justify {
+  text-align: justify;
+}
+
+.ql-indent-1 { padding-left: 3em; }
+.ql-indent-2 { padding-left: 6em; }
+.ql-indent-3 { padding-left: 9em; }
+.ql-indent-4 { padding-left: 12em; }
+.ql-indent-5 { padding-left: 15em; }
+.ql-indent-6 { padding-left: 18em; }
+.ql-indent-7 { padding-left: 21em; }
+.ql-indent-8 { padding-left: 24em; }
+
   /* Grading content */
   .grading-essay {
     max-height: 300px;
