@@ -23,6 +23,8 @@ function initComposer() {
   const RICH_TOOLBAR = [
     [{ header: [2, 3, false] }],
     ["bold", "italic", "underline"],
+    [{ align: [] }],
+    [{ indent: "-1" }, { indent: "+1" }],
     [{ list: "ordered" }, { list: "bullet" }],
     ["blockquote"],
     ["clean"]
@@ -547,7 +549,7 @@ function initComposer() {
   function mountSnowEditor(element, html, onChange, placeholder, compact, quillMap, key) {
     if (quillMap.has(key) && element.dataset.mounted) return;
     element.dataset.mounted = "1";
-    const quill = new Quill(element, { theme: "snow", placeholder, modules: { toolbar: compact ? [["bold", "italic", "underline"], [{ list: "ordered" }, { list: "bullet" }], ["clean"]] : RICH_TOOLBAR } });
+    const quill = new Quill(element, { theme: "snow", placeholder, modules: { toolbar: compact ? [["bold", "italic", "underline"], [{ align: [] }], [{ indent: "-1" }, { indent: "+1" }], [{ list: "ordered" }, { list: "bullet" }], ["clean"]] : RICH_TOOLBAR } });
     quill.root.innerHTML = html || "";
     quill.on("text-change", () => { onChange(cleanRichHtml(quill.root.innerHTML)); });
     quillMap.set(key, quill);
