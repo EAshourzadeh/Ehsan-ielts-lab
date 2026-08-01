@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     runner.advanceHandle = null;
     document.getElementById("runnerQuestionsPane").classList.remove("part-locked");
     runner.section = section;
+    document.querySelector(".exam-body")?.classList.toggle("layout-listening", section === "listening");
     runner.parts = section === "listening" ? (exam.listening || []) : (exam.reading || []);
     runner.timerSeconds = SECTION_TIMES[section];
     runner.timerStarted = false;
@@ -323,6 +324,14 @@ document.addEventListener("DOMContentLoaded", async function () {
             <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
             <button class="btn btn-ghost" id="audioSkipBtn">Skip This Part</button>
           </div>
+          <div class="audio-volume-control" id="audioVolumeControl">
+            <button type="button" class="audio-mute-btn" id="audioMuteBtn" aria-pressed="false" aria-label="Mute audio">
+              <span class="volume-icon" id="audioVolumeIcon" aria-hidden="true">&#128266;</span>
+            </button>
+            <label class="sr-only" for="audioVolumeSlider">Listening volume</label>
+            <input type="range" id="audioVolumeSlider" min="0" max="100" step="1" value="80" aria-label="Listening volume" aria-valuetext="80%">
+            <span class="audio-volume-value" id="audioVolumeValue" aria-hidden="true">80%</span>
+          </div>
           <div class="audio-status" id="audioStatus">Ready to play</div>
           <div class="audio-progress" id="audioProgress" hidden>
             <div class="audio-progress-meta"><span>Part progress</span><strong id="audioRemaining">Loading duration…</strong></div>
@@ -361,7 +370,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     qPane.innerHTML = "";
     displayQuestionGroups(part, partIdx).forEach((group, groupIndex) => {
       const section = document.createElement("details");
-      section.className = "exam-question-group";
+      const hasWideContent = (group.contentBlocks || []).length > 0;
+      section.className = "exam-question-group" + (hasWideContent ? " exam-question-group-wide" : "");
       section.open = true;
       const range = formatQuestionRange(group.entries);
       const summary = document.createElement("summary");
@@ -395,6 +405,30 @@ document.addEventListener("DOMContentLoaded", async function () {
     updateSubmitGate();
   }
 
+  const LISTENING_VOLUME_KEY = "ielts_listening_volume";
+  const DEFAULT_LISTENING_VOLUME = 0.8;
+
+  function loadSavedListeningVolume() {
+    let raw = null;
+    try {
+      raw = localStorage.getItem(LISTENING_VOLUME_KEY);
+    } catch (error) {
+      return DEFAULT_LISTENING_VOLUME; // storage unavailable (e.g. private browsing) — fall back silently
+    }
+    if (raw === null) return DEFAULT_LISTENING_VOLUME;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) return DEFAULT_LISTENING_VOLUME; // discard anything invalid/out of range
+    return parsed;
+  }
+
+  function saveListeningVolume(volume) {
+    try {
+      localStorage.setItem(LISTENING_VOLUME_KEY, String(volume));
+    } catch (error) {
+      // Non-critical — the control still works for this part, it just won't persist.
+    }
+  }
+
   function wireAudioPlayer(part) {
     const audioEl = document.getElementById("listeningAudioEl");
     const playBtn = document.getElementById("audioPlayBtn");
@@ -407,6 +441,64 @@ document.addEventListener("DOMContentLoaded", async function () {
     const activePartIndex = runner.partIndex;
 
     audioEl.addEventListener("contextmenu", event => event.preventDefault());
+
+    /* ---------- Volume control ----------
+       Uses the native <audio> .volume (0–1 gain) and .muted properties, kept
+       fully independent of play/pause/currentTime, so it can never affect the
+       "plays once, no seeking" rules. The slider always displays the actual
+       volume level even while muted — muting silences without forgetting it. */
+    const volumeSlider = document.getElementById("audioVolumeSlider");
+    const muteBtn = document.getElementById("audioMuteBtn");
+    const volumeIcon = document.getElementById("audioVolumeIcon");
+    const volumeValueEl = document.getElementById("audioVolumeValue");
+    let lastNonZeroVolume = DEFAULT_LISTENING_VOLUME;
+
+    function volumeIconFor(volume, isMuted) {
+      if (isMuted || volume <= 0) return "\u{1F507}"; // muted speaker
+      if (volume < 0.5) return "\u{1F509}"; // low volume speaker
+      return "\u{1F50A}"; // full volume speaker
+    }
+
+    function updateVolumeUI(volume, isMuted) {
+      const percent = Math.round(volume * 100);
+      volumeSlider.value = String(percent);
+      volumeValueEl.textContent = isMuted ? "Muted" : `${percent}%`;
+      volumeSlider.setAttribute("aria-valuetext", isMuted ? `Muted, ${percent}% when unmuted` : `${percent}%`);
+      muteBtn.setAttribute("aria-pressed", String(isMuted));
+      muteBtn.setAttribute("aria-label", isMuted ? "Unmute audio" : "Mute audio");
+      volumeIcon.textContent = volumeIconFor(volume, isMuted);
+    }
+
+    const initialVolume = loadSavedListeningVolume();
+    audioEl.volume = initialVolume;
+    audioEl.muted = false;
+    if (initialVolume > 0) lastNonZeroVolume = initialVolume;
+    updateVolumeUI(initialVolume, false);
+
+    volumeSlider.addEventListener("input", () => {
+      const percent = Math.min(100, Math.max(0, Number(volumeSlider.value) || 0));
+      const volume = percent / 100;
+      audioEl.volume = volume;
+      audioEl.muted = volume === 0;
+      if (volume > 0) lastNonZeroVolume = volume;
+      updateVolumeUI(volume, audioEl.muted);
+      saveListeningVolume(volume); // deliberate slider change — remember it, including a deliberate 0
+    });
+
+    muteBtn.addEventListener("click", () => {
+      const isCurrentlyMuted = audioEl.muted || audioEl.volume === 0;
+      if (isCurrentlyMuted) {
+        const restored = lastNonZeroVolume > 0 ? lastNonZeroVolume : DEFAULT_LISTENING_VOLUME;
+        audioEl.volume = restored;
+        audioEl.muted = false;
+        updateVolumeUI(restored, false);
+        saveListeningVolume(restored);
+      } else {
+        lastNonZeroVolume = audioEl.volume;
+        audioEl.muted = true; // playback continues — muting never touches play/pause or currentTime
+        updateVolumeUI(audioEl.volume, true);
+      }
+    });
 
     let lastAllowedTime = 0;
     audioEl.addEventListener("timeupdate", () => {
