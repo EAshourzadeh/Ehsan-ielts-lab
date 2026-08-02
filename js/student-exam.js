@@ -28,6 +28,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     visitedReadingParts: new Set()
   };
 
+  const LISTENING_VOLUME_KEYS = {
+    volume: "ehsanListeningVolume",
+    muted: "ehsanListeningMuted",
+    lastNonZero: "ehsanListeningLastNonZeroVolume"
+  };
+  const DEFAULT_LISTENING_VOLUME = 0.75;
+
   document.getElementById("runnerCandidateName").textContent = session.studentName;
   const questionsPane = document.getElementById("runnerQuestionsPane");
   ["copy", "cut", "paste", "contextmenu"].forEach(eventName => {
@@ -46,6 +53,9 @@ document.addEventListener("DOMContentLoaded", async function () {
     runner.timerSeconds = SECTION_TIMES[section];
     runner.timerStarted = false;
     document.getElementById("runnerSectionTag").textContent = section.toUpperCase();
+    const examBody = document.querySelector(".exam-body");
+    examBody.classList.toggle("listening-workspace", section === "listening");
+    examBody.classList.toggle("reading-workspace", section === "reading");
 
     if (runner.parts.length === 0) {
       submitSection();
@@ -86,6 +96,33 @@ document.addEventListener("DOMContentLoaded", async function () {
       .replace(/"/g, "&quot;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
+  }
+
+  function readStoredListeningNumber(key, fallback) {
+    try {
+      const rawValue = localStorage.getItem(key);
+      if (rawValue === null || rawValue.trim() === "") return fallback;
+      const value = Number(rawValue);
+      return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  function readStoredListeningMuted() {
+    try {
+      return localStorage.getItem(LISTENING_VOLUME_KEYS.muted) === "true";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function storeListeningPreference(key, value) {
+    try {
+      localStorage.setItem(key, String(value));
+    } catch (error) {
+      // Storage can be unavailable in private/restricted browser contexts.
+    }
   }
 
   function ensureExamContentStylesheet() {
@@ -350,19 +387,28 @@ document.addEventListener("DOMContentLoaded", async function () {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     if (runner.section === "listening") {
       passagePane.innerHTML = `
-        <div class="audio-player-block">
-          <h3>${part.title}</h3>
-          <p class="muted small">Audio plays once and cannot be paused, rewound, or downloaded. If you want to move on before the audio finishes, make sure you have entered your answers, then use <strong>Skip This Part</strong>.</p>
-          <div class="custom-audio-player audio-actions">
-            <button class="btn btn-primary btn-lg" id="audioPlayBtn">&#9654; Play Audio</button>
-            <button class="btn btn-ghost" id="audioSkipBtn">Skip This Part</button>
+        <div class="audio-player-block listening-audio-bar">
+          <div class="listening-audio-intro">
+            <h3>${part.title}</h3>
+            <p class="muted small">Audio starts automatically, plays once, and cannot be paused, rewound, or downloaded.</p>
           </div>
-          <div class="audio-status" id="audioStatus">Ready to play</div>
+          <div class="audio-status-wrap" aria-live="polite">
+            <span class="audio-status" id="audioStatus">Starting audio&hellip;</span>
+          </div>
           <div class="audio-progress" id="audioProgress" hidden>
-            <div class="audio-progress-meta"><span>Part progress</span><strong id="audioRemaining">Loading duration…</strong></div>
+            <div class="audio-progress-meta"><span>Part progress</span><strong id="audioRemaining">Loading duration&hellip;</strong></div>
             <div class="audio-progress-track"><div class="audio-progress-fill" id="audioProgressFill"></div></div>
           </div>
-          <audio id="listeningAudioEl" preload="auto" src="${escapeAttribute(part.audio || "")}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
+          <div class="listening-volume-control">
+            <label for="listeningVolume">Volume</label>
+            <input type="range" id="listeningVolume" min="0" max="100" step="1" aria-label="Listening audio volume">
+            <output id="listeningVolumeValue" for="listeningVolume">75%</output>
+            <button type="button" class="btn btn-ghost btn-sm audio-mute-btn" id="audioMuteBtn" aria-pressed="false">Mute</button>
+          </div>
+          <div class="custom-audio-player audio-actions">
+            <button class="btn btn-ghost" id="audioSkipBtn">Skip This Part</button>
+          </div>
+          <audio id="listeningAudioEl" preload="auto" autoplay src="${escapeAttribute(part.audio || "")}" style="display:none;" controlslist="nodownload noplaybackrate noremoteplayback" disableremoteplayback></audio>
           <div id="nextPartWrap" class="next-part-wrap" hidden>
             ${isLastPart
               ? `<button class="btn btn-primary btn-lg" id="btnNextPart">Continue to Reading &rarr;</button>`
@@ -400,7 +446,10 @@ document.addEventListener("DOMContentLoaded", async function () {
     const questionsById = new Map((part.questions || []).map(question => [question.id, question]));
     displayQuestionGroups(part, partIdx).forEach((group, groupIndex) => {
       const section = document.createElement("details");
-      section.className = "exam-question-group";
+      const hasWideContent = (group.contentBlocks || []).some(block =>
+        ["form", "matching", "mapLabelling", "table", "optionBank", "flow"].includes(block.type)
+      );
+      section.className = "exam-question-group" + (hasWideContent ? " listening-group-wide" : "");
       section.open = true;
       const range = formatQuestionRange(group.entries);
       const summary = document.createElement("summary");
@@ -439,8 +488,10 @@ document.addEventListener("DOMContentLoaded", async function () {
 
   function wireAudioPlayer(part) {
     const audioEl = document.getElementById("listeningAudioEl");
-    const playBtn = document.getElementById("audioPlayBtn");
     const skipBtn = document.getElementById("audioSkipBtn");
+    const muteBtn = document.getElementById("audioMuteBtn");
+    const volumeInput = document.getElementById("listeningVolume");
+    const volumeValue = document.getElementById("listeningVolumeValue");
     const statusEl = document.getElementById("audioStatus");
     const nextWrap = document.getElementById("nextPartWrap");
     const progressEl = document.getElementById("audioProgress");
@@ -448,7 +499,68 @@ document.addEventListener("DOMContentLoaded", async function () {
     const remainingEl = document.getElementById("audioRemaining");
     const activePartIndex = runner.partIndex;
 
+    let preferredVolume = readStoredListeningNumber(LISTENING_VOLUME_KEYS.volume, DEFAULT_LISTENING_VOLUME);
+    let previousNonZeroVolume = readStoredListeningNumber(
+      LISTENING_VOLUME_KEYS.lastNonZero,
+      preferredVolume > 0 ? preferredVolume : DEFAULT_LISTENING_VOLUME
+    );
+    let muted = readStoredListeningMuted() || preferredVolume === 0;
+
+    function updateVolumeControls() {
+      const percent = Math.round(preferredVolume * 100);
+      volumeInput.value = String(percent);
+      volumeInput.setAttribute("aria-valuetext", muted ? `${percent}% volume, muted` : `${percent}% volume`);
+      volumeValue.value = muted ? `${percent}% (muted)` : `${percent}%`;
+      volumeValue.textContent = volumeValue.value;
+      muteBtn.textContent = muted ? "Unmute" : "Mute";
+      muteBtn.setAttribute("aria-pressed", String(muted));
+      muteBtn.setAttribute("aria-label", muted ? "Unmute listening audio" : "Mute listening audio");
+    }
+
+    function applyVolume() {
+      audioEl.volume = preferredVolume;
+      audioEl.muted = muted;
+      updateVolumeControls();
+    }
+
+    function persistVolume() {
+      storeListeningPreference(LISTENING_VOLUME_KEYS.volume, preferredVolume);
+      storeListeningPreference(LISTENING_VOLUME_KEYS.muted, muted);
+      storeListeningPreference(LISTENING_VOLUME_KEYS.lastNonZero, previousNonZeroVolume);
+    }
+
+    applyVolume();
+
+    volumeInput.addEventListener("input", () => {
+      const nextVolume = Math.min(100, Math.max(0, Number(volumeInput.value))) / 100;
+      preferredVolume = Number.isFinite(nextVolume) ? nextVolume : DEFAULT_LISTENING_VOLUME;
+      if (preferredVolume > 0) {
+        previousNonZeroVolume = preferredVolume;
+        muted = false;
+      } else {
+        muted = true;
+      }
+      applyVolume();
+      persistVolume();
+    });
+
+    muteBtn.addEventListener("click", () => {
+      if (muted) {
+        if (preferredVolume === 0) preferredVolume = previousNonZeroVolume || DEFAULT_LISTENING_VOLUME;
+        muted = false;
+      } else {
+        if (preferredVolume > 0) previousNonZeroVolume = preferredVolume;
+        muted = true;
+      }
+      applyVolume();
+      persistVolume();
+    });
+
     audioEl.addEventListener("contextmenu", event => event.preventDefault());
+    audioEl.playbackRate = 1;
+    audioEl.addEventListener("ratechange", () => {
+      if (audioEl.playbackRate !== 1) audioEl.playbackRate = 1;
+    });
 
     let lastAllowedTime = 0;
     audioEl.addEventListener("timeupdate", () => {
@@ -506,29 +618,51 @@ document.addEventListener("DOMContentLoaded", async function () {
       runner.advanceHandle = setTimeout(advanceFromCompletedPart, 2600);
     }
 
-    playBtn.addEventListener("click", () => {
+    let autoplayAttempted = false;
+    let removeAutoplayFallback = () => {};
+
+    function startListeningAudio() {
+      if (autoplayAttempted || audioEl.ended) return;
+      autoplayAttempted = true;
       ensureSectionTimerStarted();
-      audioEl.play().catch(() => {
-        statusEl.textContent = "Couldn't start audio automatically — check your browser's autoplay setting.";
-        playBtn.style.display = "";
-      });
-      playBtn.style.display = "none";
-      statusEl.textContent = "▶ Playing…";
+      statusEl.textContent = "Playing...";
       progressEl.hidden = false;
-    });
+      audioEl.play()
+        .then(() => removeAutoplayFallback())
+        .catch(() => {
+          autoplayAttempted = false;
+          statusEl.textContent = "Autoplay is blocked. The recording will start with your next answer or keyboard action.";
+        });
+    }
+
+    function startAfterAllowedInteraction(event) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("#audioSkipBtn, #audioMuteBtn, #listeningVolume, #btnSubmitSection")) return;
+      startListeningAudio();
+      if (autoplayAttempted) removeAutoplayFallback();
+    }
+
+    removeAutoplayFallback = () => {
+      document.removeEventListener("pointerdown", startAfterAllowedInteraction, true);
+      document.removeEventListener("keydown", startAfterAllowedInteraction, true);
+    };
+    document.addEventListener("pointerdown", startAfterAllowedInteraction, true);
+    document.addEventListener("keydown", startAfterAllowedInteraction, true);
+    startListeningAudio();
 
     skipBtn.addEventListener("click", () => {
       syncVisibleAnswers();
       if (!confirm("Skip this listening part? You won't be able to come back to it once you move on.")) return;
       ensureSectionTimerStarted();
+      removeAutoplayFallback();
       audioEl.pause();
-      playBtn.style.display = "none";
       skipBtn.style.display = "none";
       statusEl.textContent = "⏭ Your answers (if any) have been saved, and this part was skipped.";
       onMediaReady();
     });
 
     audioEl.addEventListener("ended", () => {
+      removeAutoplayFallback();
       syncVisibleAnswers();
       statusEl.textContent = "✓ Finished playing";
       updateAudioProgress();
@@ -537,10 +671,10 @@ document.addEventListener("DOMContentLoaded", async function () {
     });
 
     audioEl.addEventListener("error", () => {
+      removeAutoplayFallback();
       syncVisibleAnswers();
       ensureSectionTimerStarted();
       statusEl.textContent = `⚠ Audio file not found at ${part.audio || "the configured path"}.`;
-      playBtn.style.display = "none";
       skipBtn.style.display = "none";
       onMediaReady();
     });
