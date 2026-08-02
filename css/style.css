@@ -867,7 +867,6 @@
   }
 
   .audio-status {
-    margin-top: 0.55rem;
     color: var(--color-teal-700);
     font-family: var(--font-mono);
     font-size: 0.82rem;
@@ -875,9 +874,9 @@
   }
 
   .audio-progress {
-    max-width: 440px;
-    margin: 1rem auto 0;
-    padding: 0.85rem 1rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.65rem 0.8rem;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
@@ -1174,6 +1173,111 @@
     border-radius: var(--radius-lg);
   }
 
+  .exam-body.listening-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .listening-workspace .exam-passage,
+  .listening-workspace .exam-questions {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .listening-workspace .exam-passage {
+    padding: 0.85rem clamp(1rem, 2.5vw, 2rem);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .listening-workspace .exam-passage > * {
+    max-width: none;
+  }
+
+  .listening-workspace .exam-questions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 1.25rem;
+    width: 100%;
+  }
+
+  .listening-workspace .exam-question-group {
+    min-width: 0;
+    margin: 0;
+    break-inside: avoid;
+  }
+
+  .listening-workspace .listening-group-wide,
+  .listening-workspace .part-locked::before {
+    grid-column: 1 / -1;
+  }
+
+  .listening-audio-bar {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.1fr) minmax(110px, auto) minmax(220px, 1.35fr) minmax(260px, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    padding: 0.8rem 1rem;
+    text-align: left;
+    border-radius: var(--radius-md);
+  }
+
+  .listening-audio-intro h3,
+  .listening-audio-intro p {
+    margin: 0;
+  }
+
+  .listening-audio-intro p {
+    margin-top: 0.2rem;
+  }
+
+  .audio-status-wrap {
+    min-width: 0;
+  }
+
+  .listening-volume-control {
+    display: grid;
+    grid-template-columns: auto minmax(90px, 1fr) auto auto;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  .listening-volume-control label,
+  .listening-volume-control output {
+    color: var(--color-text-muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .listening-volume-control input[type="range"] {
+    width: 100%;
+    min-width: 90px;
+    accent-color: var(--color-teal-700);
+  }
+
+  .listening-volume-control input[type="range"]:focus-visible,
+  .audio-mute-btn:focus-visible {
+    outline: 3px solid rgb(46 107 102 / 28%);
+    outline-offset: 3px;
+  }
+
+  .listening-audio-bar .audio-actions,
+  .listening-audio-bar .custom-audio-player {
+    margin: 0;
+  }
+
+  .listening-audio-bar .audio-actions .btn {
+    min-width: max-content;
+  }
+
+  .listening-audio-bar .next-part-wrap {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    padding-top: 0.75rem;
+    text-align: center;
+  }
+
   .audio-player-block audio {
     width: 100%;
     margin-top: 0.75rem;
@@ -1355,6 +1459,21 @@
     border-bottom: 1px solid var(--color-border);
   }
 
+  .listening-audio-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .listening-audio-intro,
+  .listening-audio-bar .audio-progress,
+  .listening-volume-control {
+    grid-column: 1 / -1;
+  }
+
+  .listening-audio-bar .audio-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
   .admin-shell {
     grid-template-columns: 1fr;
   }
@@ -1396,6 +1515,12 @@
     min-width: max-content;
     margin-top: 0;
     margin-left: auto;
+  }
+}
+
+@media (min-width: 1050px) {
+  .listening-workspace .exam-questions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1452,6 +1577,28 @@
   .exam-passage,
   .exam-questions {
     padding: 1.15rem;
+  }
+
+  .listening-workspace .exam-passage {
+    padding: 0.75rem;
+  }
+
+  .listening-audio-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .listening-audio-bar .audio-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .listening-volume-control {
+    grid-template-columns: auto minmax(80px, 1fr) auto;
+  }
+
+  .listening-volume-control .audio-mute-btn {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .candidate-nav {
