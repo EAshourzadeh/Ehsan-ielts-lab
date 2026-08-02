@@ -275,6 +275,13 @@ function escapeAttribute(value) {
   return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
+function isRelativeRepositoryPath(value) {
+  const path = String(value || "").trim();
+  if (!path || path.startsWith("/") || path.startsWith("\\") || path.includes("\\")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return false;
+  return !path.split("/").some(segment => segment === "..");
+}
+
 function generateSlotId() {
   return `slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -307,10 +314,11 @@ function registerAnswerSlotBlot() {
 
 /* Renders one real inline answer input. `value` is whatever the student has
    typed so far (or "" in the builder's preview / not started yet). */
-function slotInputHtml(question, slotId, size, value, disabled, blankIndex) {
-  const safeValue = String(value || "").replace(/"/g, "&quot;");
+function slotInputHtml(question, slotId, size, value, disabled, blankIndex, ariaLabel) {
+  const safeValue = escapeAttribute(value || "");
   const indexAttribute = Number.isInteger(blankIndex) ? ` data-blank-index="${blankIndex}"` : "";
-  return `<input type="text" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${question.id}" data-slot-id="${slotId}"${indexAttribute} value="${safeValue}" placeholder="Your answer" autocomplete="off" ${disabled ? "disabled" : ""}>`;
+  const accessibleName = ariaLabel || (Number.isInteger(blankIndex) ? `Answer for blank ${blankIndex + 1}` : "Answer");
+  return `<input type="text" class="ielts-inline-answer size-${size || "medium"}" data-question-id="${escapeAttribute(question.id)}" data-slot-id="${escapeAttribute(slotId)}"${indexAttribute} value="${safeValue}" placeholder="Your answer" aria-label="${escapeAttribute(accessibleName)}" autocomplete="off" ${disabled ? "disabled" : ""}>`;
 }
 
 /* Converts every <span class="ielts-answer-slot"> embedded in a question's rich
@@ -332,18 +340,55 @@ function hasInlineSlot(html) {
   return /class="ielts-answer-slot"/.test(String(html || ""));
 }
 
-/* ---------- IELTS content blocks: Notes card / Table / Option bank / Flow chart / Instruction key ----------
+/* ---------- IELTS content blocks: Form / Matching / Map labelling / Notes / Table / Option bank / Flow / Instruction key ----------
    These are layout wrappers a teacher can add to a question group, matching real
    Cambridge test formats. A block's rows/cells/steps are plain text and may embed
    {{q:<questionId>}} tokens — each token renders as a real inline answer input
    tied to that question (the same underlying scored question as everywhere else;
    the block just controls where and how it's displayed). */
 
-function renderTemplateText(text, answersById, disabled) {
+function valueByQuestionId(source, questionId) {
+  return source instanceof Map ? source.get(questionId) : source && source[questionId];
+}
+
+function optionBankSelectHtml(questionId, answersById, disabled, questionNumbersById, renderContext) {
+  const question = valueByQuestionId(renderContext && renderContext.questionsById, questionId);
+  const optionBank = renderContext && renderContext.optionBank;
+  if (!question || !optionBank || question.optionBankId !== optionBank.id) return "";
+  const number = valueByQuestionId(questionNumbersById, questionId);
+  const value = answersById ? answersById[questionId] || "" : "";
+  const controlId = `option-bank-${questionId}`;
+  return `<span class="option-bank-blank" id="qblock-${escapeAttribute(questionId)}">
+    ${number === undefined ? "" : `<label class="option-bank-question-number" for="${escapeAttribute(controlId)}">${escapeHtml(number)}</label>`}
+    <select id="${escapeAttribute(controlId)}" class="ielts-option-bank-select" data-question-id="${escapeAttribute(questionId)}" data-option-bank-id="${escapeAttribute(optionBank.id)}" aria-label="Answer for question ${number === undefined ? "" : escapeAttribute(number)}" ${disabled ? "disabled" : ""}>
+      <option value="">Select</option>
+      ${(optionBank.options || []).map((option, optionIndex) => `<option value="${escapeAttribute(option)}" ${value === option ? "selected" : ""}>${String.fromCharCode(65 + optionIndex)} — ${escapeHtml(option)}</option>`).join("")}
+    </select>
+  </span>`;
+}
+
+function renderTemplateText(text, answersById, disabled, questionNumbersById, renderContext) {
   const safe = escapeHtml(String(text || ""));
   return safe.replace(/\{\{q:([a-zA-Z0-9_-]+)\}\}/g, (match, questionId) => {
     const value = answersById ? answersById[questionId] : "";
-    return slotInputHtml({ id: questionId }, `${questionId}-inline`, "medium", value, disabled);
+    const bankSelect = optionBankSelectHtml(questionId, answersById, disabled, questionNumbersById, renderContext);
+    if (bankSelect) return bankSelect;
+    const number = valueByQuestionId(questionNumbersById, questionId);
+    return slotInputHtml({ id: questionId }, `${questionId}-inline`, "medium", value, disabled, undefined,
+      number === undefined ? "Answer" : `Answer for question ${number}`);
+  });
+}
+
+function renderFormValue(text, answersById, disabled, questionNumbersById) {
+  const safe = escapeHtml(String(text || ""));
+  return safe.replace(/\{\{q:([a-zA-Z0-9_-]+)\}\}/g, (match, questionId) => {
+    const value = answersById ? answersById[questionId] : "";
+    const number = questionNumbersById instanceof Map
+      ? questionNumbersById.get(questionId)
+      : questionNumbersById && questionNumbersById[questionId];
+    const numberHtml = number === undefined ? "" : `<span class="form-question-number">${escapeHtml(number)}</span>`;
+    return `${numberHtml}${slotInputHtml({ id: questionId }, `${questionId}-inline`, "medium", value, disabled, undefined,
+      number === undefined ? "Form answer" : `Answer for question ${number}`)}`;
   });
 }
 
@@ -354,7 +399,7 @@ function renderInstructionKey(block) {
   return `<section class="ielts-block instruction-key">${rows.map(([label, meaning]) => `<p><strong>${label}</strong><span>${meaning}</span></p>`).join("")}</section>`;
 }
 
-function renderContentBlock(block, answersById, disabled) {
+function renderContentBlock(block, answersById, disabled, questionNumbersById, renderContext = {}) {
   if (!block) return "";
   if (block.type === "notes") {
     return `<section class="ielts-block notes-card">
@@ -362,8 +407,79 @@ function renderContentBlock(block, answersById, disabled) {
       ${(block.sections || []).map(section => `
         <div class="notes-section">
           ${section.heading ? `<h4>${escapeHtml(section.heading)}</h4>` : ""}
-          <ul>${(section.rows || []).map(row => `<li>${renderTemplateText(row, answersById, disabled)}</li>`).join("")}</ul>
+          <ul>${(section.rows || []).map(row => `<li>${renderTemplateText(row, answersById, disabled, questionNumbersById, renderContext)}</li>`).join("")}</ul>
         </div>`).join("")}
+    </section>`;
+  }
+  if (block.type === "form") {
+    return `<section class="ielts-block form-block">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      <dl class="form-block-rows">${(block.rows || []).map(row => `
+        <div class="form-block-row">
+          <dt>${escapeHtml(row.label || "")}</dt>
+          <dd>${renderFormValue(row.value, answersById, disabled, questionNumbersById)}</dd>
+        </div>`).join("")}</dl>
+    </section>`;
+  }
+  if (block.type === "matching") {
+    const options = block.options || [];
+    const numberFor = questionId => questionNumbersById instanceof Map
+      ? questionNumbersById.get(questionId)
+      : questionNumbersById && questionNumbersById[questionId];
+    return `<section class="ielts-block matching-block">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      <div class="matching-shared-options" role="list" aria-label="Answer options">
+        ${options.map((option, optionIndex) => `<div role="listitem"><strong>${String.fromCharCode(65 + optionIndex)}</strong><span>${escapeHtml(option)}</span></div>`).join("")}
+      </div>
+      <div class="matching-grid">${(block.items || []).map(item => {
+        const questionId = item.questionId || "";
+        const number = numberFor(questionId);
+        const controlId = `matching-${questionId}`;
+        const savedAnswer = answersById ? answersById[questionId] || "" : "";
+        return `<div class="matching-grid-row" id="qblock-${escapeAttribute(questionId)}">
+          <span class="matching-question-number">${number === undefined ? "" : escapeHtml(number)}</span>
+          <label for="${escapeAttribute(controlId)}">${escapeHtml(item.text || "")}</label>
+          <select id="${escapeAttribute(controlId)}" class="ielts-matching-select" data-question-id="${escapeAttribute(questionId)}" aria-label="Answer for question ${number === undefined ? "" : escapeAttribute(number)}" ${disabled ? "disabled" : ""}>
+            <option value="">Select</option>
+            ${options.map((option, optionIndex) => {
+              const letter = String.fromCharCode(65 + optionIndex);
+              return `<option value="${letter}" ${savedAnswer === letter ? "selected" : ""}>${letter}</option>`;
+            }).join("")}
+          </select>
+        </div>`;
+      }).join("")}</div>
+    </section>`;
+  }
+  if (block.type === "mapLabelling") {
+    const choices = block.choices || [];
+    const imagePath = isRelativeRepositoryPath(block.image) ? String(block.image).trim() : "";
+    const numberFor = questionId => questionNumbersById instanceof Map
+      ? questionNumbersById.get(questionId)
+      : questionNumbersById && questionNumbersById[questionId];
+    return `<section class="ielts-block map-labelling-block" data-map-mode="${escapeAttribute(block.mode || "selectionGrid")}">
+      ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
+      ${imagePath ? `<figure class="map-labelling-image"><img src="${escapeAttribute(imagePath)}" alt="${escapeAttribute(block.alt || block.title || "Map or plan for labelling questions")}"></figure>` : ""}
+      <div class="map-choice-key" role="list" aria-label="Map labels">
+        ${choices.map((choice, choiceIndex) => {
+          const letter = String.fromCharCode(65 + choiceIndex);
+          return `<div role="listitem"><strong>${letter}</strong>${choice ? `<span>${escapeHtml(choice)}</span>` : ""}</div>`;
+        }).join("")}
+      </div>
+      <div class="map-question-grid">${(block.items || []).map(item => {
+        const questionId = item.questionId || "";
+        const number = numberFor(questionId);
+        const savedAnswer = answersById ? answersById[questionId] || "" : "";
+        return `<fieldset class="map-question-row" id="qblock-${escapeAttribute(questionId)}">
+          <legend><span class="map-question-number">${number === undefined ? "" : escapeHtml(number)}</span><span>${escapeHtml(item.text || "")}</span></legend>
+          <div class="map-answer-grid">
+            ${choices.map((choice, choiceIndex) => {
+              const letter = String.fromCharCode(65 + choiceIndex);
+              const label = choice ? `${letter} — ${choice}` : letter;
+              return `<label class="map-answer-choice"><input type="radio" class="ielts-map-choice" name="map-${escapeAttribute(questionId)}" data-question-id="${escapeAttribute(questionId)}" value="${letter}" aria-label="${escapeAttribute(label)}" ${savedAnswer === letter ? "checked" : ""} ${disabled ? "disabled" : ""}><span>${letter}</span></label>`;
+            }).join("")}
+          </div>
+        </fieldset>`;
+      }).join("")}</div>
     </section>`;
   }
   if (block.type === "table") {
@@ -373,22 +489,29 @@ function renderContentBlock(block, answersById, disabled) {
         ${(block.rows || []).map((row, rowIndex) => `<tr>${(row || []).map(cell => {
           const isHeader = rowIndex === 0 && block.headerRow;
           const tag = isHeader ? "th" : "td";
-          return `<${tag}>${renderTemplateText(cell, answersById, disabled)}</${tag}>`;
+          return `<${tag}>${renderTemplateText(cell, answersById, disabled, questionNumbersById, renderContext)}</${tag}>`;
         }).join("")}</tr>`).join("")}
       </tbody></table></div>
     </section>`;
   }
   if (block.type === "optionBank") {
-    return `<section class="ielts-block option-bank">
+    const questions = renderContext.questionsById instanceof Map
+      ? [...renderContext.questionsById.values()]
+      : Object.values(renderContext.questionsById || {});
+    const usedValues = new Set(questions
+      .filter(question => question && question.optionBankId === block.id)
+      .map(question => answersById && answersById[question.id])
+      .filter(Boolean));
+    return `<section class="ielts-block option-bank" data-option-bank-id="${escapeAttribute(block.id || "")}" data-allow-reuse="${block.allowReuse ? "true" : "false"}">
       ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
-      <div class="option-bank-grid">${(block.options || []).map((option, index) => `<p><strong>${String.fromCharCode(65 + index)}</strong><span>${escapeHtml(option)}</span></p>`).join("")}</div>
+      <div class="option-bank-grid">${(block.options || []).map((option, index) => `<p data-bank-option="${escapeAttribute(option)}" class="${usedValues.has(option) ? "is-used" : ""}"><strong>${String.fromCharCode(65 + index)}</strong><span>${escapeHtml(option)}</span><small class="option-used-indicator">Used</small></p>`).join("")}</div>
     </section>`;
   }
   if (block.type === "flow") {
     const steps = block.steps || [];
     return `<section class="ielts-block flow-block">
       ${block.title ? `<h3>${escapeHtml(block.title)}</h3>` : ""}
-      <div class="flow-list">${steps.map((step, index) => `<div class="flow-step">${renderTemplateText(step, answersById, disabled)}</div>${index < steps.length - 1 ? `<div class="flow-arrow" aria-hidden="true">&darr;</div>` : ""}`).join("")}</div>
+      <div class="flow-list">${steps.map((step, index) => `<div class="flow-step">${renderTemplateText(step, answersById, disabled, questionNumbersById, renderContext)}</div>${index < steps.length - 1 ? `<div class="flow-arrow" aria-hidden="true">&darr;</div>` : ""}`).join("")}</div>
     </section>`;
   }
   if (block.type === "instructionKey") return renderInstructionKey(block);
@@ -405,6 +528,13 @@ function contentBlockTokenIds(block) {
   };
   if (!block) return ids;
   if (block.type === "notes") (block.sections || []).forEach(section => (section.rows || []).forEach(scan));
+  if (block.type === "form") (block.rows || []).forEach(row => scan(row.value));
+  if (block.type === "matching") (block.items || []).forEach(item => {
+    if (item.questionId) ids.push(item.questionId);
+  });
+  if (block.type === "mapLabelling") (block.items || []).forEach(item => {
+    if (item.questionId) ids.push(item.questionId);
+  });
   if (block.type === "table") (block.rows || []).forEach(row => (row || []).forEach(scan));
   if (block.type === "flow") (block.steps || []).forEach(scan);
   return ids;

@@ -255,9 +255,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function displayAnswer(value, blankLabel = "Blank") {
-      if (Array.isArray(value)) return value.length ? value.map(escapeHtml).join(", ") : `<span class="answer-empty">${blankLabel}</span>`;
+      if (Array.isArray(value)) return value.length
+        ? value.map(item => String(item ?? "").trim() ? escapeHtml(item) : `<span class="answer-empty">${escapeHtml(blankLabel)}</span>`).join(", ")
+        : `<span class="answer-empty">${escapeHtml(blankLabel)}</span>`;
       const text = String(value ?? "").trim();
-      return text ? escapeHtml(text) : `<span class="answer-empty">${blankLabel}</span>`;
+      return text ? escapeHtml(text) : `<span class="answer-empty">${escapeHtml(blankLabel)}</span>`;
     }
 
     function formatDate(value) {
@@ -340,6 +342,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
           let statusLabel;
           let statusClass;
+          let displayedGiven = given;
+          let displayedKey = question.answer;
           if (question.type === "multi") {
             const { matched, isBlank } = multiMatch(question, given);
             if (isBlank) {
@@ -351,6 +355,33 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
               statusLabel = `${matched}/${weight} correct`; statusClass = "partial";
               counts.correct += matched; counts.wrong += (weight - matched);
+            }
+          } else if (question.type === "fill" && Array.isArray(question.blankAnswers) && question.blankAnswers.length) {
+            const givenValues = Array.isArray(given) ? given : [given];
+            let correctBlanks = 0;
+            let blankBlanks = 0;
+            question.blankAnswers.forEach((answerKey, blankIndex) => {
+              const current = normalizeAnswer(givenValues[blankIndex]);
+              const accepted = Array.isArray(answerKey)
+                ? answerKey
+                : String(answerKey || "").split("|").map(value => value.trim()).filter(Boolean);
+              if (!current) blankBlanks += 1;
+              else if (accepted.some(key => normalizeAnswer(key) === current)) correctBlanks += 1;
+            });
+            const wrongBlanks = weight - correctBlanks - blankBlanks;
+            counts.correct += correctBlanks;
+            counts.wrong += wrongBlanks;
+            counts.blank += blankBlanks;
+            displayedGiven = Array.from({ length: weight }, (_, index) => givenValues[index] || "");
+            displayedKey = question.blankAnswers;
+            if (correctBlanks === weight) {
+              statusLabel = "correct"; statusClass = "correct";
+            } else if (blankBlanks === weight) {
+              statusLabel = "blank"; statusClass = "blank";
+            } else if (correctBlanks === 0 && blankBlanks === 0) {
+              statusLabel = "wrong"; statusClass = "wrong";
+            } else {
+              statusLabel = `${correctBlanks}/${weight} correct`; statusClass = "partial";
             }
           } else {
             statusLabel = answerStatus(question, given);
@@ -365,8 +396,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 <div class="answer-question">${escapeHtml(stripHtml(question.text) || `Question ${numberLabel}`)}</div>
                 <div class="answer-part-label">${escapeHtml(part.title || `${title} ${partIndex + 1}`)}</div>
               </td>
-              <td class="answer-value">${displayAnswer(given)}</td>
-              <td class="answer-value correct-key">${displayAnswer(question.answer, "No key")}</td>
+              <td class="answer-value">${displayAnswer(displayedGiven)}</td>
+              <td class="answer-value correct-key">${displayAnswer(displayedKey, "No key")}</td>
               <td><span class="answer-status ${statusClass}">${statusLabel}</span></td>
             </tr>`);
         });

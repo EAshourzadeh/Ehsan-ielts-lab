@@ -215,10 +215,44 @@ document.addEventListener("DOMContentLoaded", async function () {
         answers[input.dataset.questionId] = input.value;
       }
     });
+    pane.querySelectorAll(".ielts-matching-select").forEach(select => {
+      if (!select.dataset.questionId) return;
+      if (select.value) answers[select.dataset.questionId] = select.value;
+      else delete answers[select.dataset.questionId];
+    });
+    pane.querySelectorAll(".ielts-map-choice:checked").forEach(input => {
+      if (input.dataset.questionId) answers[input.dataset.questionId] = input.value;
+    });
+    pane.querySelectorAll(".ielts-option-bank-select").forEach(select => {
+      if (!select.dataset.questionId) return;
+      if (select.value) answers[select.dataset.questionId] = select.value;
+      else delete answers[select.dataset.questionId];
+    });
 
     (part.questions || []).forEach(question => {
       const block = document.getElementById("qblock-" + question.id);
       if (!block) return;
+
+      const matchingSelect = block.querySelector(".ielts-matching-select");
+      if (matchingSelect) {
+        if (matchingSelect.value) answers[question.id] = matchingSelect.value;
+        else delete answers[question.id];
+        return;
+      }
+
+      const mapChoice = block.querySelector(".ielts-map-choice:checked");
+      if (block.querySelector(".ielts-map-choice")) {
+        if (mapChoice) answers[question.id] = mapChoice.value;
+        else delete answers[question.id];
+        return;
+      }
+
+      const optionBankSelect = block.querySelector(".ielts-option-bank-select");
+      if (optionBankSelect) {
+        if (optionBankSelect.value) answers[question.id] = optionBankSelect.value;
+        else delete answers[question.id];
+        return;
+      }
 
       if (question.type === "fill") {
         const input = block.querySelector(".q-fill-input");
@@ -359,6 +393,11 @@ document.addEventListener("DOMContentLoaded", async function () {
     }
 
     qPane.innerHTML = "";
+    const questionNumbersById = new Map((part.questions || []).map((question, questionIndex) => [
+      question.id,
+      sectionQuestionNumber(partIdx, questionIndex)
+    ]));
+    const questionsById = new Map((part.questions || []).map(question => [question.id, question]));
     displayQuestionGroups(part, partIdx).forEach((group, groupIndex) => {
       const section = document.createElement("details");
       section.className = "exam-question-group";
@@ -381,9 +420,11 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
       if ((group.contentBlocks || []).length) {
         const answersById = currentAnswers();
+        const optionBank = group.contentBlocks.find(block => block.type === "optionBank") || null;
+        const renderContext = { questionsById, optionBank };
         group.contentBlocks.forEach(block => {
           const wrap = document.createElement("div");
-          wrap.innerHTML = renderContentBlock(block, answersById, false);
+          wrap.innerHTML = renderContentBlock(block, answersById, false, questionNumbersById, renderContext);
           if (wrap.firstElementChild) groupBody.appendChild(wrap.firstElementChild);
         });
       }
@@ -391,6 +432,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       section.appendChild(groupBody);
       qPane.appendChild(section);
     });
+    updateOptionBankUsage();
     renderNavBubbles(part.questions || [], partIdx);
     updateSubmitGate();
   }
@@ -618,12 +660,82 @@ document.addEventListener("DOMContentLoaded", async function () {
       } else {
         currentAnswers()[target.dataset.questionId] = target.value;
       }
+    } else if (target.classList.contains("ielts-matching-select")) {
+      if (target.value) currentAnswers()[target.dataset.questionId] = target.value;
+      else delete currentAnswers()[target.dataset.questionId];
+    } else if (target.classList.contains("ielts-map-choice")) {
+      if (target.checked) currentAnswers()[target.dataset.questionId] = target.value;
+    } else if (target.classList.contains("ielts-option-bank-select")) {
+      if (target.value) currentAnswers()[target.dataset.questionId] = target.value;
+      else delete currentAnswers()[target.dataset.questionId];
+      updateOptionBankUsage();
     } else {
       return;
     }
     saveSession(session);
     updateNavBubbles();
   });
+
+  document.getElementById("runnerQuestionsPane").addEventListener("change", event => {
+    const target = event.target;
+    if (target.classList.contains("ielts-matching-select")) {
+      if (target.value) currentAnswers()[target.dataset.questionId] = target.value;
+      else delete currentAnswers()[target.dataset.questionId];
+    } else if (target.classList.contains("ielts-map-choice")) {
+      if (target.checked) currentAnswers()[target.dataset.questionId] = target.value;
+    } else if (target.classList.contains("ielts-option-bank-select")) {
+      if (target.value) currentAnswers()[target.dataset.questionId] = target.value;
+      else delete currentAnswers()[target.dataset.questionId];
+      updateOptionBankUsage();
+    } else {
+      return;
+    }
+    saveSession(session);
+    updateNavBubbles();
+  });
+
+  function updateOptionBankUsage() {
+    const pane = document.getElementById("runnerQuestionsPane");
+    const answers = currentAnswers();
+    let restoredDuplicateCleared = false;
+
+    pane.querySelectorAll(".option-bank[data-option-bank-id]").forEach(bankElement => {
+      const bankId = bankElement.dataset.optionBankId;
+      const allowReuse = bankElement.dataset.allowReuse === "true";
+      const selects = Array.from(pane.querySelectorAll(".ielts-option-bank-select"))
+        .filter(select => select.dataset.optionBankId === bankId);
+
+      if (!allowReuse) {
+        const claimed = new Set();
+        selects.forEach(select => {
+          if (!select.value) return;
+          if (claimed.has(select.value)) {
+            select.value = "";
+            delete answers[select.dataset.questionId];
+            restoredDuplicateCleared = true;
+          } else {
+            claimed.add(select.value);
+          }
+        });
+      }
+
+      const usedCounts = new Map();
+      selects.forEach(select => {
+        if (select.value) usedCounts.set(select.value, (usedCounts.get(select.value) || 0) + 1);
+      });
+      bankElement.querySelectorAll("[data-bank-option]").forEach(optionElement => {
+        optionElement.classList.toggle("is-used", usedCounts.has(optionElement.dataset.bankOption));
+      });
+      selects.forEach(select => {
+        Array.from(select.options).forEach(option => {
+          if (!option.value) return;
+          option.disabled = !allowReuse && usedCounts.has(option.value) && select.value !== option.value;
+        });
+      });
+    });
+
+    if (restoredDuplicateCleared) saveSession(session);
+  }
 
   function renderNavBubbles(questions, partIndex = runner.partIndex) {
     const wrap = document.getElementById("navBubbles");

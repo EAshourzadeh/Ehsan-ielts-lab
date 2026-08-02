@@ -23,8 +23,6 @@ function initComposer() {
   const RICH_TOOLBAR = [
     [{ header: [2, 3, false] }],
     ["bold", "italic", "underline"],
-    [{ align: [] }],
-    [{ indent: "-1" }, { indent: "+1" }],
     [{ list: "ordered" }, { list: "bullet" }],
     ["blockquote"],
     ["clean"]
@@ -75,8 +73,12 @@ function initComposer() {
       question.options = ["True", "False", "Not Given"];
       question.answer = ["True", "False", "Not Given"].includes(question.answer) ? question.answer : "";
     } else if (question.type === "mc" || question.type === "multi") {
-      question.options = Array.isArray(question.options) ? question.options.map(String) : [];
-      while (question.options.length < (question.type === "multi" ? 4 : 3)) question.options.push("");
+      if (question.type === "mc" && question.optionsRef) {
+        delete question.options;
+      } else {
+        question.options = Array.isArray(question.options) ? question.options.map(String) : [];
+        while (question.options.length < (question.type === "multi" ? 4 : 3)) question.options.push("");
+      }
       question.answer = question.type === "multi" ? (Array.isArray(question.answer) ? question.answer : []) : (question.answer || "");
     } else if (question.type === "label") {
       delete question.options;
@@ -186,13 +188,54 @@ function initComposer() {
     part.questions = orderedQuestions(part);
   }
 
-  function answerErrors(question) {
+  function contentBlockById(part, blockId) {
+    if (!part || !blockId) return null;
+    for (const group of part.questionGroups || []) {
+      const block = (group.contentBlocks || []).find(candidate => candidate.id === blockId);
+      if (block) return block;
+    }
+    return null;
+  }
+
+  function answerErrors(question, part) {
     if (question.type === "label") return [];
     if (question.type === "fill") {
+      if (question.optionBankId) {
+        const bank = contentBlockById(part, question.optionBankId);
+        if (!bank || bank.type !== "optionBank") return ["The linked option bank is missing."];
+        const options = (bank.options || []).map(option => String(option).trim());
+        const answer = String(question.answer || "").trim();
+        const errors = [];
+        if (options.length < 2) errors.push("Add at least two options to the linked option bank.");
+        if (options.some(option => !option)) errors.push("Complete or remove blank option-bank entries.");
+        if (!answer || !options.includes(answer)) errors.push("Select a correct answer from the linked option bank.");
+        if (!bank.allowReuse && answer) {
+          const duplicate = (part.questions || []).some(candidate =>
+            candidate.id !== question.id &&
+            candidate.optionBankId === bank.id &&
+            String(candidate.answer || "").trim() === answer
+          );
+          if (duplicate) errors.push("This option is already used by another linked blank.");
+        }
+        return errors;
+      }
       const keys = Array.isArray(question.blankAnswers) && question.blankAnswers.length ? question.blankAnswers : [question.answer];
       return keys.every(key => String(Array.isArray(key) ? key.join(" | ") : (key || "")).split("|").some(value => value.trim())) ? [] : ["Add an accepted answer for every blank."];
     }
     if (question.type === "tfng") return question.answer ? [] : ["Select the correct answer."];
+    if (question.type === "mc" && question.optionsRef) {
+      const block = contentBlockById(part, question.optionsRef);
+      if (!block || !["matching", "mapLabelling"].includes(block.type)) return ["The shared answer options are missing."];
+      const sharedOptions = (block.type === "matching" ? block.options : block.choices) || [];
+      const errors = [];
+      if (sharedOptions.length < 2) errors.push("Add at least two shared answer options.");
+      if (sharedOptions.some(option => !String(option).trim())) errors.push("Complete or remove blank shared options.");
+      const answerIndex = matchingOptionIndex(question.answer);
+      if (answerIndex < 0 || answerIndex >= sharedOptions.length || !String(sharedOptions[answerIndex] || "").trim()) {
+        errors.push("Select a valid correct answer.");
+      }
+      return errors;
+    }
     const options = (question.options || []).filter(option => String(option).trim());
     const errors = [];
     if (options.length < (question.type === "multi" ? 3 : 2)) errors.push("Add more options.");
@@ -203,13 +246,13 @@ function initComposer() {
 
   function allAnswerErrors() {
     return [...(state.exam.listening || []), ...(state.exam.reading || [])]
-      .flatMap(part => (part.questions || []).flatMap(answerErrors));
+      .flatMap(part => (part.questions || []).flatMap(question => answerErrors(question, part)));
   }
 
   function typeLabel(type) {
     return {
       fill: "Fill in the blank", mc: "Multiple choice", multi: "Multiple answer", tfng: "True / False / Not Given",
-      label: "Label / text block", notes: "Notes card", table: "Table", optionBank: "Option bank",
+      label: "Label / text block", notes: "Notes card", form: "Form", matching: "Matching", mapLabelling: "Map / Plan Labelling", table: "Table", optionBank: "Option bank",
       flow: "Flow chart", instructionKey: "Instruction key"
     }[type] || type;
   }
@@ -280,6 +323,7 @@ function initComposer() {
 
   function groupMarkup(section, part, group, partIndex) {
     const isCollapsed = state.collapsedGroups.has(group.id);
+    const hasOptionBank = (group.contentBlocks || []).some(block => block.type === "optionBank");
     const consumedByBlocks = contentBlocksConsumedIds(group.contentBlocks);
     const questions = group.questionIds
       .map(id => part.questions.find(question => question.id === id))
@@ -301,8 +345,11 @@ function initComposer() {
       <div class="content-blocks-wrap">${(group.contentBlocks || []).map((block, blockIndex) => blockEditorMarkup(part, group, block, blockIndex)).join("")}</div>
       <div class="builder-add-row">
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="notes">+ Notes Card</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="form">+ Form</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="matching">+ Matching</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="mapLabelling">+ Map / Plan</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="table">+ Table</button>
-        <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="optionBank">+ Option Bank</button>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="optionBank" ${hasOptionBank ? "disabled" : ""} title="${hasOptionBank ? "This group already has an option bank" : "Add a shared option bank"}">+ Option Bank</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="flow">+ Flow Chart</button>
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-block" data-block-type="instructionKey">+ T/F/NG Key</button>
       </div>
@@ -337,7 +384,7 @@ function initComposer() {
 
   function questionCardMarkup(section, part, group, question, partIndex, questionIndex, groupSize) {
     const isActive = state.activeQuestionId === question.id;
-    const errors = answerErrors(question);
+    const errors = answerErrors(question, part);
     const excerpt = stripHtml(question.text) || "Untitled";
     const isLabel = question.type === "label";
     const number = isLabel ? "—" : questionNumber(section, partIndex, question.id);
@@ -426,7 +473,7 @@ function initComposer() {
         <button class="btn btn-ghost btn-sm" type="button" data-action="move-block-down" data-block-index="${blockIndex}" ${blockIndex === (group.contentBlocks.length - 1) ? "disabled" : ""}>&darr;</button>
         <button class="btn btn-danger btn-sm" type="button" data-action="remove-block" data-block-index="${blockIndex}">Remove</button>
       </div></div>`;
-    const blanksPanel = blanksPanelMarkup(part, block, blockIndex);
+    const blanksPanel = blanksPanelMarkup(part, group, block, blockIndex);
 
     if (block.type === "notes") {
       return `<div class="block-editor" data-block-index="${blockIndex}">${head}
@@ -439,6 +486,100 @@ function initComposer() {
           </div>`).join("")}
         <button class="btn btn-ghost btn-sm" type="button" data-action="add-note-section">+ Section</button>
         ${blanksPanel}
+      </div>`;
+    }
+    if (block.type === "form") {
+      return `<div class="block-editor" data-block-index="${blockIndex}">${head}
+        <input class="text-input" data-block-field="title" value="${escapeAttribute(block.title || "")}" placeholder="Form title (optional)">
+        <p class="muted small builder-help">Add label/value rows. Type {{blank}} in a value where an answer belongs.</p>
+        <div class="form-editor-grid">${(block.rows || []).map((row, rowIndex) => `
+          <div class="form-editor-row">
+            <input class="text-input" data-form-label="${rowIndex}" value="${escapeAttribute(row.label || "")}" placeholder="Label, e.g. Surname">
+            <input class="text-input" data-form-value="${rowIndex}" value="${escapeAttribute(row.value || "")}" placeholder="Value or {{blank}}">
+            <button class="btn btn-ghost btn-sm" type="button" data-action="remove-form-row" data-row-index="${rowIndex}" aria-label="Remove form row">Remove</button>
+          </div>`).join("")}
+        </div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-form-row">+ Row</button>
+        ${blanksPanel}
+      </div>`;
+    }
+    if (block.type === "matching") {
+      const options = block.options || [];
+      return `<div class="block-editor" data-block-index="${blockIndex}">${head}
+        <input class="text-input" data-block-field="title" value="${escapeAttribute(block.title || "")}" placeholder="Matching title (optional)">
+        <label class="builder-field-label">Shared answer options</label>
+        <div class="matching-options-editor">${options.map((option, optionIndex) => `
+          <div class="matching-option-editor-row">
+            <strong>${String.fromCharCode(65 + optionIndex)}</strong>
+            <input class="text-input" data-matching-option-text="${optionIndex}" value="${escapeAttribute(option || "")}" placeholder="Option ${String.fromCharCode(65 + optionIndex)}">
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-matching-option-up" data-option-index="${optionIndex}" ${optionIndex === 0 ? "disabled" : ""} title="Move option up">&uarr;</button>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-matching-option-down" data-option-index="${optionIndex}" ${optionIndex === options.length - 1 ? "disabled" : ""} title="Move option down">&darr;</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="remove-matching-option" data-option-index="${optionIndex}">Remove</button>
+          </div>`).join("")}</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-matching-option">+ Option</button>
+        <label class="builder-field-label">Numbered items</label>
+        <div class="matching-items-editor">${(block.items || []).map((item, itemIndex) => {
+          const question = (part.questions || []).find(q => q.id === item.questionId);
+          const answer = question ? question.answer || "" : "";
+          return `<div class="matching-item-editor-row">
+            <strong>Item ${itemIndex + 1}</strong>
+            <input class="text-input" data-matching-item-text="${itemIndex}" value="${escapeAttribute(item.text || "")}" placeholder="Feature or statement">
+            <select class="select-input" data-matching-answer="${itemIndex}" aria-label="Correct option for item ${itemIndex + 1}">
+              <option value="">Correct option</option>
+              ${options.map((option, optionIndex) => {
+                const letter = String.fromCharCode(65 + optionIndex);
+                return `<option value="${letter}" ${answer === letter ? "selected" : ""}>${letter}${option ? ` — ${escapeHtml(option)}` : ""}</option>`;
+              }).join("")}
+            </select>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-matching-item-up" data-item-index="${itemIndex}" ${itemIndex === 0 ? "disabled" : ""} title="Move item up">&uarr;</button>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-matching-item-down" data-item-index="${itemIndex}" ${itemIndex === (block.items || []).length - 1 ? "disabled" : ""} title="Move item down">&darr;</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="remove-matching-item" data-item-index="${itemIndex}">Remove</button>
+          </div>`;
+        }).join("")}</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-matching-item">+ Item</button>
+      </div>`;
+    }
+    if (block.type === "mapLabelling") {
+      const choices = block.choices || [];
+      const imagePath = block.image || "";
+      const imagePathValid = !imagePath || isRelativeRepositoryPath(imagePath);
+      return `<div class="block-editor" data-block-index="${blockIndex}">${head}
+        <input class="text-input" data-block-field="title" value="${escapeAttribute(block.title || "")}" placeholder="Map or plan title (optional)">
+        <label class="builder-field-label">Image path</label>
+        <input class="text-input" data-block-field="image" value="${escapeAttribute(imagePath)}" placeholder="assets/images/town-plan.png">
+        <p class="muted small builder-help">Use a relative path to an image inside this repository. File uploading is not used.</p>
+        ${imagePath && imagePathValid ? `<div class="map-builder-preview"><img src="${escapeAttribute(imagePath)}" alt="Map preview"></div>` : ""}
+        ${imagePath && !imagePathValid ? `<p class="builder-validation-message">Use a repository-relative image path without a URL, leading slash, or <code>..</code>.</p>` : ""}
+        <label class="builder-field-label">Labelled choices</label>
+        <div class="map-choices-editor">${choices.map((choice, choiceIndex) => {
+          const letter = String.fromCharCode(65 + choiceIndex);
+          return `<div class="map-choice-editor-row">
+            <strong>${letter}</strong>
+            <input class="text-input" data-map-choice-text="${choiceIndex}" value="${escapeAttribute(choice || "")}" placeholder="Choice ${letter} description (optional)">
+            <button class="btn btn-ghost btn-sm" type="button" data-action="remove-map-choice" data-choice-index="${choiceIndex}">Remove</button>
+          </div>`;
+        }).join("")}</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-map-choice">+ Choice</button>
+        <label class="builder-field-label">Numbered locations / items</label>
+        <div class="map-items-editor">${(block.items || []).map((item, itemIndex) => {
+          const question = (part.questions || []).find(q => q.id === item.questionId);
+          const answer = question ? question.answer || "" : "";
+          return `<div class="map-item-editor-row">
+            <strong>Item ${itemIndex + 1}</strong>
+            <input class="text-input" data-map-item-text="${itemIndex}" value="${escapeAttribute(item.text || "")}" placeholder="Location or feature">
+            <select class="select-input" data-map-answer="${itemIndex}" aria-label="Correct map label for item ${itemIndex + 1}">
+              <option value="">Correct letter</option>
+              ${choices.map((choice, choiceIndex) => {
+                const letter = String.fromCharCode(65 + choiceIndex);
+                return `<option value="${letter}" ${answer === letter ? "selected" : ""}>${letter}${choice ? ` — ${escapeHtml(choice)}` : ""}</option>`;
+              }).join("")}
+            </select>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-map-item-up" data-item-index="${itemIndex}" ${itemIndex === 0 ? "disabled" : ""} title="Move item up">&uarr;</button>
+            <button class="btn btn-ghost btn-sm row-move" type="button" data-action="move-map-item-down" data-item-index="${itemIndex}" ${itemIndex === (block.items || []).length - 1 ? "disabled" : ""} title="Move item down">&darr;</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-action="remove-map-item" data-item-index="${itemIndex}">Remove</button>
+          </div>`;
+        }).join("")}</div>
+        <button class="btn btn-ghost btn-sm" type="button" data-action="add-map-item">+ Item</button>
       </div>`;
     }
     if (block.type === "table") {
@@ -458,6 +599,11 @@ function initComposer() {
       return `<div class="block-editor" data-block-index="${blockIndex}">${head}
         <input class="text-input" data-block-field="title" value="${escapeAttribute(block.title || "")}" placeholder="Option bank title (optional)">
         <textarea data-block-field="options" rows="5" placeholder="One option per line — shown as A, B, C…">${escapeHtml((block.options || []).join("\n"))}</textarea>
+        <label class="builder-field-label">Option reuse</label>
+        <select class="select-input" data-block-field="reuseMode">
+          <option value="once" ${block.allowReuse ? "" : "selected"}>Each option may be used once</option>
+          <option value="multiple" ${block.allowReuse ? "selected" : ""}>Each option may be used more than once</option>
+        </select>
       </div>`;
     }
     if (block.type === "flow") {
@@ -482,17 +628,33 @@ function initComposer() {
 
   // Every {{blank}} placeholder typed into a block's text is auto-matched (in order)
   // to a real backing question, listed here so the teacher can set its answer key.
-  function blanksPanelMarkup(part, block, blockIndex) {
+  function blanksPanelMarkup(part, group, block, blockIndex) {
     const ids = block.blankQuestionIds || [];
     if (!ids.length) return "";
+    const supportsOptionBank = ["notes", "table", "flow"].includes(block.type);
+    const optionBank = supportsOptionBank
+      ? (group.contentBlocks || []).find(candidate => candidate.type === "optionBank")
+      : null;
     return `<div class="block-blanks-panel">
       <label class="builder-field-label">Blanks in this block</label>
       ${ids.map((id, index) => {
         const question = (part.questions || []).find(q => q.id === id);
         const answer = question ? (Array.isArray(question.answer) ? question.answer.join(" | ") : (question.answer || "")) : "";
+        const linkedToBank = Boolean(question && optionBank && question.optionBankId === optionBank.id);
         return `<div class="block-blank-row">
           <span class="block-blank-index">Blank ${index + 1}</span>
-          <input class="text-input" data-block-blank-answer="${blockIndex}:${index}" value="${escapeAttribute(answer)}" placeholder="Accepted answer(s), e.g. 10 | ten">
+          <div class="block-blank-answer-editor">
+            ${linkedToBank ? `<select class="select-input" data-block-blank-bank-answer="${blockIndex}:${index}" aria-label="Correct option for blank ${index + 1}">
+              <option value="">Select the correct option</option>
+              ${(optionBank.options || []).map((option, optionIndex) => {
+                const usedByAnotherBlank = !optionBank.allowReuse && (part.questions || []).some(candidate =>
+                  candidate.id !== id && candidate.optionBankId === optionBank.id && candidate.answer === option
+                );
+                return `<option value="${escapeAttribute(option)}" ${answer === option ? "selected" : ""} ${usedByAnotherBlank ? "disabled" : ""}>${String.fromCharCode(65 + optionIndex)} — ${escapeHtml(option)}</option>`;
+              }).join("")}
+            </select>` : `<input class="text-input" data-block-blank-answer="${blockIndex}:${index}" value="${escapeAttribute(answer)}" placeholder="Accepted answer(s), e.g. 10 | ten">`}
+            ${optionBank ? `<label class="bank-link-toggle"><input type="checkbox" data-block-blank-bank-link="${blockIndex}:${index}" ${linkedToBank ? "checked" : ""}> Answer from shared option bank</label>` : ""}
+          </div>
         </div>`;
       }).join("")}
     </div>`;
@@ -530,13 +692,14 @@ function initComposer() {
   function renderInspector() {
     const parts = [...(state.exam.listening || []), ...(state.exam.reading || [])];
     const total = parts.reduce((sum, part) => sum + (part.questions || []).reduce((a, q) => a + questionWeightLocal(q), 0), 0);
-    const incomplete = parts.flatMap(part => part.questions || []).filter(question => answerErrors(question).length).length;
+    const incomplete = parts.flatMap(part => (part.questions || []).map(question => ({ question, part })))
+      .filter(({ question, part }) => answerErrors(question, part).length).length;
     $("#builderInspector").innerHTML = `
       <h3>Exam health</h3>
       <p><strong>${total}</strong> numbered answer slot${total === 1 ? "" : "s"}</p>
       <p><strong>${incomplete}</strong> question${incomplete === 1 ? "" : "s"} need${incomplete === 1 ? "s" : ""} an answer key</p>
       <hr class="inspector-rule">
-      <p class="muted small">Question groups can hold Notes cards, Tables, Option banks, Flow charts, and a T/F/NG key — matching real Cambridge test layouts.</p>`;
+      <p class="muted small">Question groups can hold Forms, Matching sets, Map/Plan labelling, Notes cards, Tables, Option banks, Flow charts, and a T/F/NG key — matching real Cambridge test layouts.</p>`;
   }
 
   /* ---------- Rich editor mounting ---------- */
@@ -549,7 +712,7 @@ function initComposer() {
   function mountSnowEditor(element, html, onChange, placeholder, compact, quillMap, key) {
     if (quillMap.has(key) && element.dataset.mounted) return;
     element.dataset.mounted = "1";
-    const quill = new Quill(element, { theme: "snow", placeholder, modules: { toolbar: compact ? [["bold", "italic", "underline"], [{ align: [] }], [{ indent: "-1" }, { indent: "+1" }], [{ list: "ordered" }, { list: "bullet" }], ["clean"]] : RICH_TOOLBAR } });
+    const quill = new Quill(element, { theme: "snow", placeholder, modules: { toolbar: compact ? [["bold", "italic", "underline"], [{ list: "ordered" }, { list: "bullet" }], ["clean"]] : RICH_TOOLBAR } });
     quill.root.innerHTML = html || "";
     quill.on("text-change", () => { onChange(cleanRichHtml(quill.root.innerHTML)); });
     quillMap.set(key, quill);
@@ -779,7 +942,21 @@ function initComposer() {
       }
       return;
     }
-    if (action === "add-block") { flushAllEditors(); addContentBlock(ctx.group, button.dataset.blockType); markDirty(); renderAll(); return; }
+    if (action === "add-block") {
+      flushAllEditors();
+      const type = button.dataset.blockType;
+      if (type === "optionBank" && (ctx.group.contentBlocks || []).some(block => block.type === "optionBank")) {
+        alert("Each question group can contain only one shared option bank.");
+        return;
+      }
+      addContentBlock(ctx.group, type);
+      const block = ctx.group.contentBlocks[ctx.group.contentBlocks.length - 1];
+      if (type === "form") syncBlockBlanks(ctx.part, block);
+      if (type === "matching") syncMatchingQuestions(ctx.part, ctx.group, block);
+      if (type === "mapLabelling") syncMapLabellingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
     if (action === "remove-block") { flushAllEditors(); removeContentBlock(ctx.part, ctx.group, ctx.blockIndex); markDirty(); renderAll(); return; }
     if (action === "move-block-up" || action === "move-block-down") {
       flushAllEditors();
@@ -798,6 +975,117 @@ function initComposer() {
     if (action === "remove-note-section") {
       flushAllEditors();
       ctx.group.contentBlocks[ctx.blockIndex].sections.splice(Number(button.dataset.sectionIndex), 1);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "add-form-row") {
+      flushAllEditors();
+      ctx.group.contentBlocks[ctx.blockIndex].rows.push({ label: "", value: "" });
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "remove-form-row") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      block.rows.splice(Number(button.dataset.rowIndex), 1);
+      syncBlockBlanks(ctx.part, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "add-matching-item") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      block.items.push({ id: makeId("match-item"), text: "", questionId: "" });
+      syncMatchingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "remove-matching-item") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const [removed] = block.items.splice(Number(button.dataset.itemIndex), 1);
+      if (removed && removed.questionId) removeQuestionEverywhere(ctx.part, removed.questionId);
+      syncMatchingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "move-matching-item-up" || action === "move-matching-item-down") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const index = Number(button.dataset.itemIndex);
+      const target = action.endsWith("up") ? index - 1 : index + 1;
+      if (target < 0 || target >= block.items.length) return;
+      [block.items[index], block.items[target]] = [block.items[target], block.items[index]];
+      syncMatchingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "add-matching-option") {
+      flushAllEditors();
+      ctx.group.contentBlocks[ctx.blockIndex].options.push("");
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "remove-matching-option") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const index = Number(button.dataset.optionIndex);
+      block.options.splice(index, 1);
+      remapMatchingAnswers(ctx.part, block, oldIndex => oldIndex === index ? -1 : (oldIndex > index ? oldIndex - 1 : oldIndex));
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "move-matching-option-up" || action === "move-matching-option-down") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const index = Number(button.dataset.optionIndex);
+      const target = action.endsWith("up") ? index - 1 : index + 1;
+      if (target < 0 || target >= block.options.length) return;
+      [block.options[index], block.options[target]] = [block.options[target], block.options[index]];
+      remapMatchingAnswers(ctx.part, block, oldIndex => oldIndex === index ? target : (oldIndex === target ? index : oldIndex));
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "add-map-item") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      block.items.push({ id: makeId("map-item"), text: "", questionId: "", x: null, y: null });
+      syncMapLabellingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "remove-map-item") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const [removed] = block.items.splice(Number(button.dataset.itemIndex), 1);
+      if (removed && removed.questionId) removeQuestionEverywhere(ctx.part, removed.questionId);
+      syncMapLabellingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "move-map-item-up" || action === "move-map-item-down") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const index = Number(button.dataset.itemIndex);
+      const target = action.endsWith("up") ? index - 1 : index + 1;
+      if (target < 0 || target >= block.items.length) return;
+      [block.items[index], block.items[target]] = [block.items[target], block.items[index]];
+      syncMapLabellingQuestions(ctx.part, ctx.group, block);
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "add-map-choice") {
+      flushAllEditors();
+      ctx.group.contentBlocks[ctx.blockIndex].choices.push("");
+      markDirty(); renderAll();
+      return;
+    }
+    if (action === "remove-map-choice") {
+      flushAllEditors();
+      const block = ctx.group.contentBlocks[ctx.blockIndex];
+      const index = Number(button.dataset.choiceIndex);
+      block.choices.splice(index, 1);
+      remapMapAnswers(ctx.part, block, oldIndex => oldIndex === index ? -1 : (oldIndex > index ? oldIndex - 1 : oldIndex));
       markDirty(); renderAll();
       return;
     }
@@ -873,10 +1161,50 @@ function initComposer() {
       const block = ctx.group.contentBlocks[ctx.blockIndex];
       const blockField = target.dataset.blockField;
       if (blockField === "title") block.title = target.value;
+      if (blockField === "image") block.image = target.value.trim();
       if (blockField === "headerRow") block.headerRow = target.checked;
-      if (blockField === "options") block.options = target.value.split(/\r?\n/);
+      if (blockField === "options") {
+        const previousOptions = Array.isArray(block.options) ? [...block.options] : [];
+        const nextOptions = target.value.split(/\r?\n/);
+        (ctx.part.questions || []).forEach(question => {
+          if (question.optionBankId !== block.id) return;
+          const oldIndex = previousOptions.indexOf(question.answer);
+          if (oldIndex >= 0) question.answer = nextOptions[oldIndex] || "";
+        });
+        block.options = nextOptions;
+      }
+      if (blockField === "reuseMode") block.allowReuse = target.value === "multiple";
       if (blockField === "steps") { block.steps = target.value.split(/\r?\n/); syncBlockBlanks(ctx.part, block); }
       if (blockField === "preset") block.preset = target.value;
+      if (target.dataset.formLabel !== undefined) block.rows[Number(target.dataset.formLabel)].label = target.value;
+      if (target.dataset.formValue !== undefined) {
+        block.rows[Number(target.dataset.formValue)].value = target.value;
+        if (event.type === "change") syncBlockBlanks(ctx.part, block);
+      }
+      if (target.dataset.matchingOptionText !== undefined) block.options[Number(target.dataset.matchingOptionText)] = target.value;
+      if (target.dataset.matchingItemText !== undefined) {
+        const item = block.items[Number(target.dataset.matchingItemText)];
+        item.text = target.value;
+        const question = ctx.part.questions.find(q => q.id === item.questionId);
+        if (question) question.text = target.value;
+      }
+      if (target.dataset.matchingAnswer !== undefined) {
+        const item = block.items[Number(target.dataset.matchingAnswer)];
+        const question = ctx.part.questions.find(q => q.id === item.questionId);
+        if (question) question.answer = target.value;
+      }
+      if (target.dataset.mapChoiceText !== undefined) block.choices[Number(target.dataset.mapChoiceText)] = target.value;
+      if (target.dataset.mapItemText !== undefined) {
+        const item = block.items[Number(target.dataset.mapItemText)];
+        item.text = target.value;
+        const question = ctx.part.questions.find(q => q.id === item.questionId);
+        if (question) question.text = target.value;
+      }
+      if (target.dataset.mapAnswer !== undefined) {
+        const item = block.items[Number(target.dataset.mapAnswer)];
+        const question = ctx.part.questions.find(q => q.id === item.questionId);
+        if (question) question.answer = target.value;
+      }
       if (target.dataset.noteHeading !== undefined) block.sections[Number(target.dataset.noteHeading)].heading = target.value;
       if (target.dataset.noteRows !== undefined) { block.sections[Number(target.dataset.noteRows)].rows = target.value.split(/\r?\n/); syncBlockBlanks(ctx.part, block); }
       if (target.dataset.tableCell) {
@@ -893,8 +1221,28 @@ function initComposer() {
           question.answer = alternatives.length > 1 ? alternatives : (alternatives[0] || "");
         }
       }
+      if (target.dataset.blockBlankBankLink) {
+        const [bIndex, blankIndex] = target.dataset.blockBlankBankLink.split(":").map(Number);
+        const questionId = ctx.group.contentBlocks[bIndex].blankQuestionIds[blankIndex];
+        const question = ctx.part.questions.find(q => q.id === questionId);
+        const optionBank = (ctx.group.contentBlocks || []).find(candidate => candidate.type === "optionBank");
+        if (question) {
+          if (target.checked && optionBank) {
+            question.optionBankId = optionBank.id;
+            if (!optionBank.options.includes(question.answer)) question.answer = "";
+          } else {
+            delete question.optionBankId;
+          }
+        }
+      }
+      if (target.dataset.blockBlankBankAnswer) {
+        const [bIndex, blankIndex] = target.dataset.blockBlankBankAnswer.split(":").map(Number);
+        const questionId = ctx.group.contentBlocks[bIndex].blankQuestionIds[blankIndex];
+        const question = ctx.part.questions.find(q => q.id === questionId);
+        if (question) question.answer = target.value;
+      }
       markDirty();
-      if (blockField === "steps" || target.dataset.noteRows !== undefined || target.dataset.tableCell) renderAll();
+      if (blockField === "steps" || target.dataset.noteRows !== undefined || target.dataset.tableCell || (target.dataset.formValue !== undefined && event.type === "change") || (target.dataset.matchingOptionText !== undefined && event.type === "change") || (target.dataset.mapChoiceText !== undefined && event.type === "change") || (blockField === "image" && event.type === "change") || (blockField === "options" && event.type === "change") || (target.dataset.blockBlankBankLink && event.type === "change")) renderAll();
       else renderInspector();
     }
   }
@@ -910,8 +1258,11 @@ function initComposer() {
   function addContentBlock(group, type) {
     const presets = {
       notes: { id: makeId("block"), type, title: "", sections: [{ heading: "", rows: ["Row with {{blank}}"] }], blankQuestionIds: [] },
+      form: { id: makeId("block"), type, title: "", rows: [{ label: "Field", value: "{{blank}}" }], blankQuestionIds: [] },
+      matching: { id: makeId("block"), type, title: "", options: ["First option", "Second option", "Third option", "Fourth option"], items: [{ id: makeId("match-item"), text: "First item", questionId: "" }] },
+      mapLabelling: { id: makeId("block"), type, title: "", mode: "selectionGrid", image: "", choices: ["", "", "", "", "", "", "", ""], items: [{ id: makeId("map-item"), text: "First location", questionId: "", x: null, y: null }] },
       table: { id: makeId("block"), type, title: "", headerRow: true, rows: [["Heading 1", "Heading 2"], ["Item", "{{blank}}"]], blankQuestionIds: [] },
-      optionBank: { id: makeId("block"), type, title: "", options: ["First option", "Second option", "Third option"] },
+      optionBank: { id: makeId("block"), type, title: "", options: ["First option", "Second option", "Third option"], allowReuse: false },
       flow: { id: makeId("block"), type, title: "", steps: ["First step", "Step with {{blank}}", "Final step"], blankQuestionIds: [] },
       instructionKey: { id: makeId("block"), type, preset: "tfng" }
     };
@@ -921,7 +1272,106 @@ function initComposer() {
   function removeContentBlock(part, group, blockIndex) {
     const block = group.contentBlocks[blockIndex];
     (block.blankQuestionIds || []).forEach(id => removeQuestionEverywhere(part, id));
+    if (block.type === "matching") (block.items || []).forEach(item => {
+      if (item.questionId) removeQuestionEverywhere(part, item.questionId);
+    });
+    if (block.type === "mapLabelling") (block.items || []).forEach(item => {
+      if (item.questionId) removeQuestionEverywhere(part, item.questionId);
+    });
+    if (block.type === "optionBank") (part.questions || []).forEach(question => {
+      if (question.optionBankId === block.id) delete question.optionBankId;
+    });
     group.contentBlocks.splice(blockIndex, 1);
+  }
+
+  function matchingOptionIndex(letter) {
+    const code = String(letter || "").toUpperCase().charCodeAt(0);
+    return code >= 65 && code <= 90 ? code - 65 : -1;
+  }
+
+  function remapMatchingAnswers(part, block, remapIndex) {
+    (block.items || []).forEach(item => {
+      const question = (part.questions || []).find(q => q.id === item.questionId);
+      if (!question || !question.answer) return;
+      const nextIndex = remapIndex(matchingOptionIndex(question.answer));
+      question.answer = nextIndex >= 0 && nextIndex < 26 ? String.fromCharCode(65 + nextIndex) : "";
+    });
+  }
+
+  function syncMatchingQuestions(part, group, block) {
+    block.options = Array.isArray(block.options) ? block.options.map(String) : [];
+    block.items = Array.isArray(block.items) ? block.items : [];
+    const validAnswers = new Set(block.options.map((option, index) => String.fromCharCode(65 + index)));
+    const previousIds = new Set(block.items.map(item => item.questionId).filter(Boolean));
+
+    block.items.forEach(item => {
+      item.id = item.id || makeId("match-item");
+      item.text = item.text || "";
+      item.questionId = item.questionId || makeId("match");
+      let question = (part.questions || []).find(q => q.id === item.questionId);
+      if (!question) {
+        question = normalizeQuestion({ id: item.questionId, type: "mc", text: item.text, answer: "", optionsRef: block.id });
+        part.questions.push(question);
+      }
+      question.type = "mc";
+      question.text = item.text;
+      question.optionsRef = block.id;
+      delete question.options;
+      if (!validAnswers.has(question.answer)) question.answer = "";
+    });
+
+    const orderedIds = block.items.map(item => item.questionId);
+    const originalIds = group.questionIds || [];
+    const oldPositions = originalIds.map((id, index) => previousIds.has(id) ? index : -1).filter(index => index >= 0);
+    const insertAt = oldPositions.length ? Math.min(...oldPositions) : originalIds.length;
+    const remainingIds = originalIds.filter(id => !previousIds.has(id) && !orderedIds.includes(id));
+    remainingIds.splice(Math.min(insertAt, remainingIds.length), 0, ...orderedIds);
+    group.questionIds = remainingIds;
+    syncQuestionOrder(part);
+  }
+
+  function remapMapAnswers(part, block, remapIndex) {
+    (block.items || []).forEach(item => {
+      const question = (part.questions || []).find(q => q.id === item.questionId);
+      if (!question || !question.answer) return;
+      const nextIndex = remapIndex(matchingOptionIndex(question.answer));
+      question.answer = nextIndex >= 0 && nextIndex < 26 ? String.fromCharCode(65 + nextIndex) : "";
+    });
+  }
+
+  function syncMapLabellingQuestions(part, group, block) {
+    block.mode = block.mode || "selectionGrid";
+    block.choices = Array.isArray(block.choices) ? block.choices.map(String) : [];
+    block.items = Array.isArray(block.items) ? block.items : [];
+    const validAnswers = new Set(block.choices.map((choice, index) => String.fromCharCode(65 + index)));
+    const previousIds = new Set(block.items.map(item => item.questionId).filter(Boolean));
+
+    block.items.forEach(item => {
+      item.id = item.id || makeId("map-item");
+      item.text = item.text || "";
+      item.questionId = item.questionId || makeId("map");
+      if (item.x === undefined) item.x = null;
+      if (item.y === undefined) item.y = null;
+      let question = (part.questions || []).find(q => q.id === item.questionId);
+      if (!question) {
+        question = normalizeQuestion({ id: item.questionId, type: "mc", text: item.text, answer: "", optionsRef: block.id });
+        part.questions.push(question);
+      }
+      question.type = "mc";
+      question.text = item.text;
+      question.optionsRef = block.id;
+      delete question.options;
+      if (!validAnswers.has(question.answer)) question.answer = "";
+    });
+
+    const orderedIds = block.items.map(item => item.questionId);
+    const originalIds = group.questionIds || [];
+    const oldPositions = originalIds.map((id, index) => previousIds.has(id) ? index : -1).filter(index => index >= 0);
+    const insertAt = oldPositions.length ? Math.min(...oldPositions) : originalIds.length;
+    const remainingIds = originalIds.filter(id => !previousIds.has(id) && !orderedIds.includes(id));
+    remainingIds.splice(Math.min(insertAt, remainingIds.length), 0, ...orderedIds);
+    group.questionIds = remainingIds;
+    syncQuestionOrder(part);
   }
 
   // Scans a block's text fields for {{blank}} and already-resolved {{q:<id>}}
@@ -936,6 +1386,7 @@ function initComposer() {
     if (!currentGroup) return;
     const rawText = (() => {
       if (block.type === "notes") return (block.sections || []).flatMap(s => s.rows || []).join("\n");
+      if (block.type === "form") return (block.rows || []).map(row => row.value || "").join("\n");
       if (block.type === "table") return (block.rows || []).flatMap(row => row || []).join("\n");
       if (block.type === "flow") return (block.steps || []).join("\n");
       return "";
@@ -967,6 +1418,7 @@ function initComposer() {
       return `{{q:${id}}}`;
     });
     if (block.type === "notes") (block.sections || []).forEach(section => { section.rows = (section.rows || []).map(substitute); });
+    if (block.type === "form") (block.rows || []).forEach(row => { row.value = substitute(row.value); });
     if (block.type === "table") (block.rows || []).forEach(row => { row.forEach((cell, i) => { row[i] = substitute(cell); }); });
     if (block.type === "flow") block.steps = (block.steps || []).map(substitute);
   }
